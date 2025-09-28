@@ -73,7 +73,8 @@ export function useAuthCallback(params: AuthCallbackParams) {
         setError("Authentication failed - no user data received");
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Authentication failed";
+      const errorMessage =
+        error instanceof Error ? error.message : "Authentication failed";
       setError(errorMessage);
     } finally {
       setLoading(false);

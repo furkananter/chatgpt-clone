@@ -1,6 +1,8 @@
 import os
+import ssl
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dj_database_url
 import environ
@@ -102,28 +104,40 @@ AUTHENTICATION_BACKENDS = [
 
 
 REDIS_URL = env("REDIS_URL")
+REDIS_PARSED = urlparse(REDIS_URL)
+REDIS_SSL_OPTIONS = None
+if REDIS_PARSED.scheme == "rediss":
+    REDIS_SSL_OPTIONS = {
+        "ssl_cert_reqs": ssl.CERT_REQUIRED,
+        "ssl_check_hostname": True,
+        "ssl_ca_certs": None,
+    }
+
+def _redis_options(*, include_serializer: bool = False) -> dict:
+    options: dict[str, object] = {
+        "CLIENT_CLASS": "django_redis.client.DefaultClient",
+    }
+    if include_serializer:
+        options["SERIALIZER"] = "django_redis.serializers.json.JSONSerializer"
+    if REDIS_SSL_OPTIONS:
+        options["CONNECTION_POOL_KWARGS"] = REDIS_SSL_OPTIONS
+    return options
+
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": f"{REDIS_URL}/0",
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-            "SERIALIZER": "django_redis.serializers.json.JSONSerializer",
-        },
+        "LOCATION": REDIS_URL,
+        "OPTIONS": _redis_options(include_serializer=True),
     },
     "sessions": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": f"{REDIS_URL}/0",
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        },
+        "LOCATION": REDIS_URL,
+        "OPTIONS": _redis_options(),
     },
     "rate_limiting": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": f"{REDIS_URL}/0",
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        },
+        "LOCATION": REDIS_URL,
+        "OPTIONS": _redis_options(),
     },
 }
 
@@ -147,23 +161,23 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=f"{REDIS_URL}/0")
-CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=f"{REDIS_URL}/0")
-CELERY_TASK_DEFAULT_QUEUE = "default"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_TIMEZONE = TIME_ZONE
 
 
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [env("CHANNEL_REDIS_URL", default=f"{REDIS_URL}/0")],
+            "hosts": [env("CHANNEL_REDIS_URL", default=REDIS_URL)],
         },
     }
 }
+CHANNEL_REDIS_PARSED = urlparse(CHANNEL_LAYERS["default"]["CONFIG"]["hosts"][0])
+if CHANNEL_REDIS_PARSED.scheme == "rediss":
+    CHANNEL_LAYERS["default"]["CONFIG"]["ssl"] = {
+        "cert_reqs": ssl.CERT_REQUIRED,
+        "check_hostname": True,
+        "ca_certs": None,
+    }
 
 
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=True)

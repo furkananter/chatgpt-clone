@@ -21,7 +21,7 @@ class LoginRequest(Schema):
 
 
 class TokenRefreshRequest(Schema):
-    refresh_token: str
+    refresh_token: str | None = None
 
 
 class UserProfileResponse(ModelSchema):
@@ -62,4 +62,3 @@ class SessionResponse(Schema):
 
 class LogoutResponse(Schema):
     message: str
-

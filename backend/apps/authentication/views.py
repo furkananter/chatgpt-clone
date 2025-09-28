@@ -151,17 +151,27 @@ async def refresh_token(request, data: TokenRefreshRequest = None):
             refresh_token = data.refresh_token
 
         if not refresh_token:
+            logger.warning("Refresh token missing; cookies=%s", list(request.COOKIES.keys()))
             raise HttpError(401, "No refresh token provided")
 
         payload = JWTService.decode_refresh_token(refresh_token)
         user = await User.objects.aget(id=payload["user_id"])
 
-        session = await UserSession.objects.aget(
-            user=user,
-            session_id=payload["session_id"],
-            is_active=True,
-            expires_at__gt=timezone.now(),
-        )
+        try:
+            session = await UserSession.objects.aget(
+                user=user,
+                session_id=payload["session_id"],
+                is_active=True,
+                expires_at__gt=timezone.now(),
+            )
+        except UserSession.DoesNotExist as exc:
+            logger.warning(
+                "Refresh session not found or inactive; user=%s session=%s",
+                user.id,
+                payload.get("session_id"),
+            )
+            raise HttpError(401, "Invalid refresh token") from exc
+
         tokens = JWTService.generate_tokens(user, session.session_id)
 
         auth_data = {
@@ -191,6 +201,9 @@ async def refresh_token(request, data: TokenRefreshRequest = None):
         )
         return response_obj
     except (InvalidTokenError, UserSession.DoesNotExist):
+        logger.warning(
+            "Refresh failed for cookies=%s", list(request.COOKIES.keys())
+        )
         raise HttpError(401, "Invalid refresh token")
 
 

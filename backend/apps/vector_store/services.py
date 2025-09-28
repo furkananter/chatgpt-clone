@@ -19,17 +19,27 @@ class QdrantService:
     @classmethod
     def get_client(cls) -> QdrantClient:
         if cls._client is None:
-            cls._client = QdrantClient(
-                host=settings.QDRANT_HOST,
-                port=settings.QDRANT_PORT,
-                api_key=settings.QDRANT_API_KEY or None,
-            )
+            host_value = str(settings.QDRANT_HOST)
+            api_key = settings.QDRANT_API_KEY or None
+
+            if host_value.startswith("http://") or host_value.startswith("https://"):
+                cls._client = QdrantClient(
+                    url=host_value,
+                    api_key=api_key,
+                )
+            else:
+                port_value = settings.QDRANT_PORT
+                cls._client = QdrantClient(
+                    host=host_value,
+                    port=int(port_value) if port_value else None,
+                    api_key=api_key,
+                )
         return cls._client
 
     @classmethod
     def ensure_collection(cls) -> None:
         client = cls.get_client()
-        if not client.has_collection(cls.COLLECTION_NAME):
+        if not client.collection_exists(cls.COLLECTION_NAME):
             client.create_collection(
                 collection_name=cls.COLLECTION_NAME,
                 vectors_config=qmodels.VectorParams(
@@ -86,4 +96,3 @@ class QdrantService:
                 )
             ),
         )
-

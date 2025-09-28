@@ -1,21 +1,16 @@
 import asyncio
 import logging
 
-from celery import shared_task
-from django.db.models import F
-from django.utils import timezone
-
-from apps.authentication.models import User
-from apps.chats.models import Message
-
-from .models import AIModel, ConversationMemory, UsageTracking
-from .services import Mem0Service
-
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, max_retries=2)
-def update_memory(self, chat_id: str, message_id: str):
+def update_memory(chat_id: str, message_id: str):
+    from django.db.models import F
+    from django.utils import timezone
+    from apps.chats.models import Message
+    from .models import ConversationMemory
+    from .services import Mem0Service
+
     try:
         message = Message.objects.select_related("chat", "chat__user").get(id=message_id)
         chat = message.chat
@@ -35,12 +30,14 @@ def update_memory(self, chat_id: str, message_id: str):
         )
     except Exception as exc:  # pragma: no cover
         logger.error("Memory update failed: %s", exc)
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=30)
+        raise
 
 
-@shared_task
 def track_usage(user_id: str, model: str, tokens_used: int):
+    from django.db.models import F
+    from apps.authentication.models import User
+    from .models import AIModel, UsageTracking
+
     try:
         ai_model = AIModel.objects.get(name=model)
         estimated_cost = (tokens_used / 1_000_000) * float(ai_model.input_price_per_million)

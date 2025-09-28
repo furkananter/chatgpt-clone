@@ -5,6 +5,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
 from django.conf import settings
+from django.db.models import Q
 
 from apps.chats.models import Message
 
@@ -24,6 +25,16 @@ class OpenRouterAPIError(Exception):
 
 class OpenRouterService:
     BASE_URL = "https://openrouter.ai/api/v1"
+    DEFAULT_MODEL = "openai/gpt-4o-mini"
+    _MODEL_ALIASES = {
+        "gpt-4-1 mini": "openai/gpt-4.1-mini",
+        "gpt-4-1": "openai/gpt-4.1",
+        "gpt-4o mini": "openai/gpt-4o-mini",
+        "gpt-4o-mini": "openai/gpt-4o-mini",
+        "o3-mini": "openai/o3-mini",
+        "claude 3.5 sonnet": "anthropic/claude-3.5-sonnet",
+        "gemini 2.5 flash": "google/gemini-1.5-flash",
+    }
 
     @classmethod
     def get_headers(cls) -> Dict[str, str]:
@@ -88,6 +99,37 @@ class OpenRouterService:
             raise OpenRouterAPIError("Request timeout") from exc
         except httpx.RequestError as exc:  # pragma: no cover
             raise OpenRouterAPIError(f"Request error: {exc}") from exc
+
+    @classmethod
+    def resolve_model_id(cls, raw_model: str | None) -> str:
+        """Map friendly names to OpenRouter-compatible identifiers."""
+
+        candidate = (raw_model or "").strip()
+        if not candidate:
+            logger.debug("No model provided. Falling back to %s", cls.DEFAULT_MODEL)
+            return cls.DEFAULT_MODEL
+
+        if "/" in candidate:
+            return candidate
+
+        alias = cls._MODEL_ALIASES.get(candidate.lower())
+        if alias:
+            return alias
+
+        try:
+            record = AIModel.objects.get(
+                Q(name__iexact=candidate)
+                | Q(display_name__iexact=candidate)
+                | Q(openrouter_model_id__iexact=candidate)
+            )
+            return record.openrouter_model_id
+        except AIModel.DoesNotExist:
+            logger.warning(
+                "Unknown OpenRouter model '%s'. Falling back to %s",
+                candidate,
+                cls.DEFAULT_MODEL,
+            )
+            return cls.DEFAULT_MODEL
 
     @classmethod
     async def get_available_models(cls) -> List[Dict[str, Any]]:
@@ -181,11 +223,31 @@ class Mem0Service:
                 user_id=memory_id,
                 limit=limit,
             )
-            context_parts = [f"Memory: {item['text']}" for item in memories or []]
-            return "\n".join(context_parts)
         except Exception as exc:  # pragma: no cover
             logger.warning("Failed to retrieve memories: %s", exc)
             return ""
+
+        context_parts: list[str] = []
+        for item in memories or []:
+            text: Optional[str] = None
+            if isinstance(item, dict):
+                text = (
+                    item.get("text")
+                    or item.get("content")
+                    or item.get("value")
+                )
+                if not text and isinstance(item.get("payload"), dict):
+                    payload = item["payload"]
+                    text = payload.get("text") or payload.get("content")
+            elif isinstance(item, str):
+                text = item
+            else:
+                text = str(item)
+
+            if text:
+                context_parts.append(f"Memory: {text}")
+
+        return "\n".join(context_parts)
 
     async def update_memory(
         self,
@@ -231,4 +293,3 @@ async def record_usage(
         response_time_ms=response_time_ms,
         was_cached=was_cached,
     )
-

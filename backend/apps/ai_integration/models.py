@@ -68,9 +68,13 @@ class UsageTracking(models.Model):
         ("memory", "Memory"),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="usage_records")
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="usage_records"
+    )
     chat = models.ForeignKey(Chat, on_delete=models.CASCADE, null=True, blank=True)
-    message = models.ForeignKey(Message, on_delete=models.CASCADE, null=True, blank=True)
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, null=True, blank=True
+    )
 
     model_used = models.CharField(max_length=100)
     operation_type = models.CharField(max_length=50, choices=OPERATION_CHOICES)
@@ -79,7 +83,9 @@ class UsageTracking(models.Model):
     output_tokens = models.PositiveIntegerField(default=0)
     total_tokens = models.PositiveIntegerField(default=0)
 
-    estimated_cost = models.DecimalField(max_digits=10, decimal_places=6, default=Decimal("0"))
+    estimated_cost = models.DecimalField(
+        max_digits=10, decimal_places=6, default=Decimal("0")
+    )
 
     response_time_ms = models.PositiveIntegerField(default=0)
     was_cached = models.BooleanField(default=False)
@@ -88,4 +94,3 @@ class UsageTracking(models.Model):
 
     def __str__(self) -> str:
         return f"Usage {self.model_used} for user {self.user_id}"
-

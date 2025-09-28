@@ -15,7 +15,7 @@ class Chat(models.Model):
     title = models.CharField(max_length=255, blank=True)
     is_title_generated = models.BooleanField(default=False)
 
-    model_used = models.CharField(max_length=100, default="gpt-3.5-turbo")
+    model_used = models.CharField(max_length=100, default="gpt-4o-mini")
     system_prompt = models.TextField(blank=True)
     temperature = models.FloatField(default=0.7)
     max_tokens = models.PositiveIntegerField(default=1000)
@@ -77,7 +77,11 @@ class Message(models.Model):
     error_message = models.TextField(blank=True)
 
     parent_message = models.ForeignKey(
-        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="children"
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="children",
     )
     thread_id = models.UUIDField(null=True, blank=True)
 
@@ -113,7 +117,9 @@ class MessageAttachment(models.Model):
         ("other", "Other"),
     ]
 
-    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="attachments")
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name="attachments"
+    )
     file_name = models.CharField(max_length=255)
     file_type = models.CharField(max_length=20, choices=ATTACHMENT_TYPES)
     file_size = models.PositiveIntegerField()
@@ -128,4 +134,3 @@ class MessageAttachment(models.Model):
 
     def __str__(self) -> str:
         return self.file_name
-

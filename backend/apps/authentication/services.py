@@ -76,7 +76,9 @@ class GoogleOAuthService:
         return response.json()
 
     @classmethod
-    async def exchange_code_for_user_data(cls, code: str, redirect_uri: str) -> dict[str, Any]:
+    async def exchange_code_for_user_data(
+        cls, code: str, redirect_uri: str
+    ) -> dict[str, Any]:
         """Exchange authorization code for user data using Google OAuth flow."""
         try:
             # Build flow and exchange code for credentials
@@ -99,7 +101,9 @@ class GoogleOAuthService:
 
         except Exception as exc:
             logger.error(f"OAuth code exchange failed: {exc}")
-            raise GoogleOAuthError(f"Failed to exchange code for user data: {exc}") from exc
+            raise GoogleOAuthError(
+                f"Failed to exchange code for user data: {exc}"
+            ) from exc
 
     @classmethod
     async def create_or_update_user(cls, google_user_data: dict[str, Any]):
@@ -127,7 +131,9 @@ class GoogleOAuthService:
 
 class JWTService:
     @staticmethod
-    def _base_payload(user: User, session_id: uuid.UUID | None = None) -> dict[str, Any]:
+    def _base_payload(
+        user: User, session_id: uuid.UUID | None = None
+    ) -> dict[str, Any]:
         now = datetime.now(timezone.utc)
         payload = {
             "user_id": str(user.id),
@@ -140,7 +146,9 @@ class JWTService:
         return payload
 
     @classmethod
-    def generate_tokens(cls, user: User, session_id: uuid.UUID | None = None) -> dict[str, str]:
+    def generate_tokens(
+        cls, user: User, session_id: uuid.UUID | None = None
+    ) -> dict[str, str]:
         if session_id is None:
             session_id = uuid.uuid4()
         access_payload = cls._base_payload(user, session_id=session_id)
@@ -165,7 +173,11 @@ class JWTService:
             settings.SECRET_KEY,
             algorithm=settings.JWT_ALGORITHM,
         )
-        return {"access": access_token, "refresh": refresh_token, "session_id": session_id}
+        return {
+            "access": access_token,
+            "refresh": refresh_token,
+            "session_id": session_id,
+        }
 
     @staticmethod
     def decode_token(token: str) -> dict[str, Any]:
@@ -223,5 +235,3 @@ class UserSessionService:
             UserSession.objects.filter(session_id=session_id).update(is_active=False)
 
         await sync_to_async(_invalidate, thread_sensitive=True)()
-
-

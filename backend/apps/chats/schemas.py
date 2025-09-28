@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
+from uuid import UUID
 
 from ninja import ModelSchema, Schema
 
@@ -22,6 +23,7 @@ class MessageAttachmentSchema(ModelSchema):
 
 class MessageResponse(ModelSchema):
     attachments: List[MessageAttachmentSchema] | None = None
+    parent_message: Optional[UUID] = None
 
     class Meta:
         model = Message
@@ -93,6 +95,7 @@ class ChatListResponse(ModelSchema):
 
 
 class ChatCreateRequest(Schema):
+    id: Optional[UUID] = None  # Allow frontend to specify UUID
     title: Optional[str] = None
     system_prompt: Optional[str] = None
     model: Optional[str] = None
@@ -137,4 +140,3 @@ class MessageRegenerateRequest(Schema):
 class ChatSearchQuery(Schema):
     archived: bool = False
     search: Optional[str] = None
-

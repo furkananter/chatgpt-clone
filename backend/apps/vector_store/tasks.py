@@ -1,16 +1,12 @@
 import logging
 
-from celery import shared_task
-
-from apps.chats.models import Message
-
-from .services import QdrantService
-
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, max_retries=2)
-def create_embeddings(self, message_id: str):
+def create_embeddings(message_id: str):
+    from apps.chats.models import Message
+    from .services import QdrantService
+
     try:
         message = Message.objects.select_related("chat", "chat__user").get(id=message_id)
         vector_id = QdrantService.create_message_embedding(
@@ -29,6 +25,5 @@ def create_embeddings(self, message_id: str):
         logger.warning("Message %s no longer exists for embedding", message_id)
     except Exception as exc:  # pragma: no cover
         logger.error("Embedding creation failed: %s", exc)
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc, countdown=30)
+        raise
 

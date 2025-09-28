@@ -1,6 +1,6 @@
 import hashlib
 import json
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
 from django.core.cache import caches
 

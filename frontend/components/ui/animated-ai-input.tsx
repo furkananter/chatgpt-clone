@@ -95,11 +95,9 @@ const OPENAI_ICON = (
 
 interface AIPromptProps {
   placeholder?: string;
-  onSubmit?: (
-    text: string,
-    selectedModel: string,
-    attachments?: AttachmentPayload[]
-  ) => void;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+  value: string;
+  onInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onModelChange?: (model: string) => void;
   defaultModel?: string;
   disabled?: boolean;
@@ -109,12 +107,13 @@ interface AIPromptProps {
 export function AI_Prompt({
   placeholder = "What can I do for you?",
   onSubmit,
+  value,
+  onInputChange,
   onModelChange,
   defaultModel = "GPT-4-1 Mini",
   disabled = false,
   className,
 }: AIPromptProps) {
-  const [value, setValue] = useState("");
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
     minHeight: 72,
     maxHeight: 300,
@@ -194,39 +193,37 @@ export function AI_Prompt({
     onModelChange?.(model);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && value.trim() && !disabled) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const handleSend = () => {
-    if (!value.trim() || disabled) return;
-    onSubmit?.(value, selectedModel);
-    setValue("");
-    adjustHeight(true);
-  };
+  useEffect(() => {
+    adjustHeight();
+  }, [value, adjustHeight]);
 
   return (
     <div className={cn("w-full max-w-4xl py-4", className)}>
-      <div className="bg-black/5 dark:bg-white/5 rounded-2xl p-1.5">
+      <form
+        onSubmit={(e) => {
+          if (!value.trim() || disabled) {
+            e.preventDefault();
+            return;
+          }
+          onSubmit(e);
+          adjustHeight(true);
+        }}
+        className="bg-black/5 dark:bg-white/5 rounded-2xl p-1.5"
+      >
         <div className="relative">
           <div className="relative flex flex-col">
             <div className="overflow-y-auto" style={{ maxHeight: "400px" }}>
               <Textarea
                 value={value}
+                onChange={(e) => {
+                  onInputChange(e);
+                }}
                 placeholder={placeholder}
                 className={cn(
                   "w-full rounded-xl rounded-b-none px-4 py-3 bg-black/5 dark:bg-white/5 border-none dark:text-white placeholder:text-black/70 dark:placeholder:text-white/70 resize-none focus-visible:ring-0 focus-visible:ring-offset-0",
                   "min-h-[72px]"
                 )}
                 ref={textareaRef}
-                onKeyDown={handleKeyDown}
-                onChange={(e) => {
-                  setValue(e.target.value);
-                  adjustHeight();
-                }}
                 disabled={disabled}
               />
             </div>
@@ -319,14 +316,13 @@ export function AI_Prompt({
                   </label>
                 </div>
                 <button
-                  type="button"
+                  type="submit"
                   className={cn(
                     "rounded-lg p-2 bg-black/5 dark:bg-white/5",
                     "hover:bg-black/10 dark:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-offset-0 focus-visible:ring-blue-500"
                   )}
                   aria-label="Send message"
                   disabled={!value.trim() || disabled}
-                  onClick={handleSend}
                 >
                   <ArrowRight
                     className={cn(
@@ -339,7 +335,7 @@ export function AI_Prompt({
             </div>
           </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

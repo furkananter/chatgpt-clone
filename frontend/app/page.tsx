@@ -1,12 +1,32 @@
 "use client";
 
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { OpenAILogo } from "@/components/icons";
 import { useGoogleAuth } from "@/hooks/use-google-auth";
+import { fetchChats } from "@/lib/api/chat";
+import { queryKeys } from "@/lib/query/client";
 
 export default function HomePage() {
   const { handleGoogleAuth, error } = useGoogleAuth();
+  const queryClient = useQueryClient();
+
+  // Prefetch chats data for faster transitions after authentication
+  useEffect(() => {
+    const prefetchChats = () => {
+      queryClient.prefetchQuery({
+        queryKey: queryKeys.chats(),
+        queryFn: () => fetchChats(),
+        staleTime: 1000 * 60 * 5, // Consider fresh for 5 minutes
+      });
+    };
+
+    // Prefetch after a short delay to not block initial page load
+    const timer = setTimeout(prefetchChats, 1000);
+    return () => clearTimeout(timer);
+  }, [queryClient]);
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
