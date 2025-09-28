@@ -1,7 +1,7 @@
 import type React from "react";
 // Shared layout for /chat and /chat/[chatId]
 
-import { Sidebar } from "@/components/chat/sidebar";
+import { Sidebar } from "@/components/chat/sidebar/sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 
 export default function ChatLayout({

@@ -4,6 +4,13 @@
 import { useEffect, useRef, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useChatStore, Chat } from "@/lib/stores/chat-store";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import { MessageBubble } from "@/components/chat/message-bubble";
 
 export default function ChatPage() {
   const params = useParams() as { chatId?: string };
@@ -98,7 +105,7 @@ export default function ChatPage() {
   if (!chat) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="text-zinc-400">Chat not found</div>
+        <div className="text-muted-foreground">Chat not found</div>
       </div>
     );
   }
@@ -107,51 +114,41 @@ export default function ChatPage() {
     <div className="flex h-full flex-col">
       <div className="border-b p-4">
         <h1 className="text-lg font-semibold">{chat.title}</h1>
-        <p className="text-sm text-gray-600">Model: {selectedModel}</p>
+        <p className="text-sm text-muted-foreground">Model: {selectedModel}</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="mx-auto w-full max-w-2xl space-y-4">
+      <Conversation className="flex-1">
+        <ConversationContent className="mx-auto w-full max-w-2xl space-y-4">
           {currentError && (
             <div className="text-red-500 text-sm p-2 bg-red-50 rounded border">
               Error: {currentError}
             </div>
           )}
 
-          {currentMessages.map((message) => (
-            <div
-              key={message.id}
-              className={`p-3 rounded-lg ${
-                message.role === "user"
-                  ? "bg-blue-100 ml-12"
-                  : "bg-gray-100 mr-12"
-              }`}
-            >
-              <div className="text-sm text-gray-600 mb-1">
-                {message.role === "user" ? "You" : "Assistant"} -{" "}
-                {new Date(message.created_at).toLocaleTimeString()}
-              </div>
-              <div className="whitespace-pre-wrap">{message.content}</div>
-              {message.role === "assistant" && (
-                <button
-                  onClick={() =>
-                    handleEdit(message.id, "Updated: " + message.content)
-                  }
-                  className="text-xs text-blue-600 hover:underline mt-2"
-                >
-                  Edit
-                </button>
-              )}
-            </div>
-          ))}
+          {currentMessages.length === 0 ? (
+            <ConversationEmptyState
+              title="No messages yet"
+              description="Start a conversation by typing a message below"
+            />
+          ) : (
+            currentMessages.map((message) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                onEdit={(newText) => handleEdit(message.id, newText)}
+              />
+            ))
+          )}
 
           {currentIsLoading && (
             <div className="text-center text-gray-500">Loading...</div>
           )}
 
           <div ref={endRef} />
-        </div>
-      </div>
+        </ConversationContent>
+
+        <ConversationScrollButton />
+      </Conversation>
 
       <div className="border-t p-4">
         <div className="mx-auto w-full max-w-2xl">

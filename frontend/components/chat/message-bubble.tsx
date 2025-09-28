@@ -58,7 +58,7 @@ export function MessageBubble({
           className={cn(
             "rounded-2xl px-4 py-3 text-normal leading-6 flex flex-col gap-2",
             isUser
-              ? "bg-secondary max-w-lg text-zinc-100"
+              ? "bg-secondary max-w-lg text-secondary-foreground"
               : "bg-primary text-zinc-200 w-full",
             "overflow-hidden text-pretty"
           )}
@@ -70,18 +70,18 @@ export function MessageBubble({
                 value={editedText}
                 onChange={(e) => setEditedText(e.target.value)}
                 rows={Math.min(editedText.split("\n").length + 1, 8)}
-                className="w-full resize-none bg-transparent focus:outline-none text-white"
+                className="w-full resize-none bg-transparent focus:outline-none text-secondary-foreground"
               />
               <div className="flex justify-end gap-2 pt-1">
                 <button
                   onClick={handleCancelEdit}
-                  className="text-white bg-black cursor-pointer px-3 py-1 text-sm rounded-full"
+                  className="text-secondary-foreground bg-black cursor-pointer px-3 py-1 text-sm rounded-full"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSendEdit}
-                  className="bg-white text-black px-3 py-1 cursor-pointer text-sm rounded-full hover:opacity-90"
+                  className="bg-white text-secondary-foreground px-3 py-1 cursor-pointer text-sm rounded-full hover:opacity-90"
                 >
                   Send
                 </button>

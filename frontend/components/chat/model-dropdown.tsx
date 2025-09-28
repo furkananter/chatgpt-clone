@@ -1,19 +1,19 @@
 "use client";
 
 import { useChatStore } from "@/lib/stores/chat-store";
-import { Check, ChevronDown, Sparkles, Atom } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Sparkles, Atom } from "lucide-react";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"; // Replace with correct path
+  PromptInputModelSelect,
+  PromptInputModelSelectTrigger,
+  PromptInputModelSelectContent,
+  PromptInputModelSelectItem,
+  PromptInputModelSelectValue,
+} from "@/components/ai-elements/prompt-input";
 
 const MODELS = [
   {
     id: "gpt-5",
-    name: "ChatGPT 5",
+    name: "ChatGPT-5",
     description: "Our smartest model & more",
     upgrade: true,
     icon: <Sparkles className="w-4 h-4 text-white" />,
@@ -22,14 +22,14 @@ const MODELS = [
     id: "claude-sonnet-4",
     name: "Claude Sonnet 4",
     description: "Great for everyday tasks",
-    upgrade: false,
+    upgrade: true,
     icon: <Atom className="w-4 h-4 text-zinc-400" />,
   },
   {
     id: "gpt-5-thinking",
-    name: "ChatGPT 5 Thinking",
+    name: "ChatGPT-5 Thinking",
     description: "Great for everyday tasks",
-    upgrade: false,
+    upgrade: true,
     icon: <Atom className="w-4 h-4 text-zinc-400" />,
   },
 ];
@@ -37,47 +37,27 @@ const MODELS = [
 export function ModelDropdown() {
   const { selectedModel, switchModel } = useChatStore();
 
+  // TODO(human): Implement custom model item rendering logic
+  // Consider how to display model icons, descriptions, and upgrade badges
+  // within the Select component structure. The current MODELS array has:
+  // - icon: React component for model icon
+  // - description: Model description text
+  // - upgrade: Boolean for upgrade badge
+  // You'll need to customize PromptInputModelSelectItem to show these elements
+
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          className="px-4 py-2 text-lg font-normal focus:outline-none rounded-md bg-primary text-primary-foreground hover:bg-accent hover:text-accent-foreground"
-        >
-          {selectedModel} <ChevronDown className="h-4 w-4 ml-2" />
-        </Button>
-      </DropdownMenuTrigger>
+    <PromptInputModelSelect value={selectedModel} onValueChange={switchModel}>
+      <PromptInputModelSelectTrigger className="w-auto min-w-[140px]">
+        <PromptInputModelSelectValue placeholder="Select model" />
+      </PromptInputModelSelectTrigger>
 
-      <DropdownMenuContent className="w-72 py-1">
-        {MODELS.map((m) => (
-          <DropdownMenuItem
-            key={m.name}
-            onClick={() => switchModel(m.name)}
-            className="focus:bg-accent px-4 py-2 cursor-pointer flex justify-between items-center gap-3"
-          >
-            {/* Left Section: Icon + Text */}
-            <div className="flex items-start gap-3">
-              <div className="pt-1">{m.icon}</div>
-              <div className="flex flex-col">
-                <span className="text-sm font-normal">{m.name}</span>
-                <span className="text-xs text-muted-foreground">{m.description}</span>
-              </div>
-            </div>
-
-            {/* Right Section: Upgrade badge + Check */}
-            <div className="flex items-center gap-2 ml-auto">
-              {m.upgrade && (
-                <span className="text-xs text-zinc-400 border border-zinc-600 rounded-md px-2 py-0.5">
-                  Upgrade
-                </span>
-              )}
-              {selectedModel === m.name && (
-                <Check className="w-4 h-4 text-zinc-300" />
-              )}
-            </div>
-          </DropdownMenuItem>
+      <PromptInputModelSelectContent>
+        {MODELS.map((model) => (
+          <PromptInputModelSelectItem key={model.id} value={model.name}>
+            {model.name}
+          </PromptInputModelSelectItem>
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PromptInputModelSelectContent>
+    </PromptInputModelSelect>
   );
 }

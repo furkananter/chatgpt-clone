@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { SquarePen, Search } from "lucide-react";
-import { GPTsIcon, VideoIcon, LibraryIcon } from "../icons";
+import { GPTsIcon, VideoIcon, LibraryIcon } from "../../icons";
 
 export const SidebarHeader: React.FC = () => {
   return (

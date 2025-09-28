@@ -15,11 +15,13 @@ export function SidebarItem({ chat }: { chat: Chat }) {
       href={`/chat/${chat.id}`}
       className={cn(
         "group flex items-center hover:bg-primary justify-between rounded-xl px-3 py-2 text-sm",
-        active ? "bg-secondary text-white" : "text-text-whitehover:bg-secondary"
+        active
+          ? "bg-secondary text-secondary-foreground"
+          : "text-secondary-foreground hover:bg-secondary"
       )}
     >
       <span className="truncate font-normal">{chat.title}</span>
-      <Ellipsis className="h-4 w-4 text-text-white opacity-0 group-hover:opacity-100" />
+      <Ellipsis className="h-4 w-4 text-secondary-foreground opacity-0 group-hover:opacity-100" />
     </Link>
   );
 }

@@ -12,7 +12,7 @@ export function SidebarSection({
   return (
     <div className="space-y-2">
       <br />
-      <div className="px-3 text-xs uppercase font-semibold tracking-wide text-white">
+      <div className="px-3 text-xs uppercase font-semibold tracking-wide text-secondary-foreground">
         {title}
       </div>
       <div className="space-y-2">
