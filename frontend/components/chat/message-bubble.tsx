@@ -16,7 +16,7 @@ export function MessageBubble({
   message,
   onEdit,
 }: {
-  message: { id: string; role: string; content: string; created_at: string };
+  message: { id: string; role: string; content: string; created_at: string; status?: string };
   onEdit?: (text: string) => void;
 }) {
   const isUser = message.role === "user";
@@ -61,7 +61,7 @@ export function MessageBubble({
             "rounded-2xl px-4 py-3 text-normal leading-6 flex flex-col gap-2",
             isUser
               ? "bg-secondary max-w-lg text-secondary-foreground"
-              : "bg-primary text-zinc-200 w-full",
+              : "text-foreground w-full", // Removed background for AI
             "overflow-hidden text-pretty"
           )}
         >
@@ -89,7 +89,7 @@ export function MessageBubble({
                 </button>
               </div>
             </div>
-          ) : message.content === "..." ? (
+          ) : (message.content === "..." || message.status === "thinking") && !isUser ? (
             <TextShimmer duration={1.5}>Thinking...</TextShimmer>
           ) : (
             <MemoizedMarkdown id={message.id} content={message.content} />

@@ -14,6 +14,8 @@ export const useChats = () => {
   const query = useQuery<ChatSummary[]>({
     queryKey: queryKeys.chats(),
     queryFn: ({ signal }) => fetchChats(signal),
+    staleTime: 1000 * 30, // Consider data fresh for 30 seconds
+    gcTime: 1000 * 60 * 10, // Keep in cache for 10 minutes
   });
 
   return {
@@ -39,9 +41,6 @@ export const useCreateChatMutation = () => {
         const exists = current.some((item) => item.id === chat.id);
         return exists ? current : [chat, ...current];
       });
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats() });
     },
   });
 };

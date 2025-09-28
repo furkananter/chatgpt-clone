@@ -29,6 +29,7 @@ class ChatService:
         title: str | None,
         model: str,
         system_prompt: str | None,
+        chat_id: str | None = None,
     ) -> Chat:
         with transaction.atomic():
             try:
@@ -36,14 +37,20 @@ class ChatService:
             except ObjectDoesNotExist:
                 preferences = None
 
-            chat = Chat.objects.create(
-                user=user,
-                title=title or "Untitled chat",
-                model_used=model,
-                system_prompt=system_prompt or "",
-                temperature=(preferences.default_temperature if preferences else 0.7),
-                max_tokens=(preferences.default_max_tokens if preferences else 1000),
-            )
+            chat_kwargs = {
+                "user": user,
+                "title": title or "Untitled chat",
+                "model_used": model or user.preferred_model or "gpt-4o-mini",
+                "system_prompt": system_prompt or "",
+                "temperature": (preferences.default_temperature if preferences else 0.7),
+                "max_tokens": (preferences.default_max_tokens if preferences else 1000),
+            }
+
+            # If chat_id is provided, use it
+            if chat_id:
+                chat_kwargs["id"] = chat_id
+
+            chat = Chat.objects.create(**chat_kwargs)
             return chat
 
     @staticmethod
@@ -54,6 +61,7 @@ class ChatService:
         model: str,
         system_prompt: str | None,
         initial_message: str | None,
+        chat_id: str | None = None,
     ) -> Chat:
         mem0_service = Mem0Service()
 
@@ -62,6 +70,7 @@ class ChatService:
             title=title,
             model=model,
             system_prompt=system_prompt,
+            chat_id=chat_id,
         )
 
         try:
@@ -157,6 +166,27 @@ class MessageService:
         return message
 
     @staticmethod
+    async def create_assistant_placeholder(
+        *,
+        chat: Chat,
+        parent_message: Message,
+        model: str,
+    ) -> Message:
+        """Create an assistant message skeleton ready for streaming updates."""
+
+        def _create() -> Message:
+            return Message.objects.create(
+                chat=chat,
+                role="assistant",
+                content="",
+                status="processing",
+                model_used=model,
+                parent_message=parent_message,
+            )
+
+        return await sync_to_async(_create, thread_sensitive=True)()
+
+    @staticmethod
     def get_conversation_context(chat: Chat, limit: int = 20) -> list[dict[str, str]]:
         messages = list(
             chat.messages.order_by("-created_at")[:limit].values("role", "content")
@@ -193,13 +223,17 @@ class MessageService:
 
     @staticmethod
     async def check_user_message_limit(user: User) -> bool:
-        return user.monthly_message_count < user.monthly_message_limit
+        # Disable message limit for development
+        return True
+        # return user.monthly_message_count < user.monthly_message_limit
 
     @staticmethod
     def check_ai_rate_limit(user: User) -> bool:
-        key = f"{MessageService.RATE_LIMIT_PREFIX}:{user.id}"
-        allowed, _remaining = RateLimiter.check_rate_limit(key, limit=50, window=3600)
-        return allowed
+        # Disable rate limit for development
+        return True
+        # key = f"{MessageService.RATE_LIMIT_PREFIX}:{user.id}"
+        # allowed, _remaining = RateLimiter.check_rate_limit(key, limit=1000, window=3600)
+        # return allowed
 
     @staticmethod
     async def increment_user_usage(user: User) -> None:

@@ -1,164 +1,556 @@
-// app/chat/[chatId]/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { nanoid } from "nanoid";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 
-import {
-  Conversation,
-  ConversationContent,
-  ConversationEmptyState,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
 import { MessageBubble } from "@/components/chat/message-bubble";
-import { AI_Prompt } from "@/components/ui/animated-ai-input";
-import { useChats } from "@/hooks/use-chats";
-import {
-  useChatMessages,
-  useEditMessageMutation,
-  useSendMessageMutation,
-} from "@/hooks/use-chat-messages";
-import { type AttachmentPayload } from "@/lib/api/chat";
+import { TextShimmer } from "@/components/ui/text-shimmer";
+import { useChatHistory } from "@/hooks/use-chat-history";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { queryKeys } from "@/lib/query/client";
+import {
+  normalizeMessage,
+  type AttachmentPayload,
+  type ChatMessage,
+  type ChatSummary,
+} from "@/lib/api/chat";
+import { parseStreamEvent, type StreamEvent } from "@/lib/chat-stream";
+
+type StreamingContext = {
+  optimisticUserId: string;
+  placeholderId: string;
+};
+
+interface SendMessageOptions {
+  reuseExisting?: boolean;
+  suppressInputReset?: boolean;
+  attachments?: AttachmentPayload[];
+}
+
+const ERROR_COPY = "Sorry, there was an error. Please try again.";
 
 export default function ChatPage() {
-  const params = useParams() as { chatId?: string };
-  const chatId = params?.chatId;
+  const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const chatId = params.chatId as string;
+  const initialMessage = searchParams.get("message");
 
-  const { chats } = useChats();
-  const { messages, isLoading, isFetching, isError, error } = useChatMessages(chatId);
-  const sendMessageMutation = useSendMessageMutation(chatId);
-  const editMessageMutation = useEditMessageMutation(chatId);
+  const queryClient = useQueryClient();
+  const setActiveChatId = useChatStore((state) => state.setActiveChatId);
+  const selectedModel = useChatStore((state) => state.selectedModel);
 
-  const { selectedModel, switchModel, setActiveChatId } = useChatStore();
+  const [inputValue, setInputValue] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  const streamInFlightRef = useRef(false);
+  const initialStreamTriggeredRef = useRef(false);
+  const streamAbortRef = useRef<AbortController | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { messages, isLoading } = useChatHistory(chatId, {
+    enabled: !initialMessage,
+  });
+
+  const orderedMessages = useMemo(() => messages ?? [], [messages]);
 
   useEffect(() => {
-    setActiveChatId(chatId ?? null);
-    return () => setActiveChatId(null);
+    setActiveChatId(chatId);
   }, [chatId, setActiveChatId]);
 
-  const chat = useMemo(
-    () => chats.find((item) => item.id === chatId),
-    [chats, chatId]
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [orderedMessages]);
+
+  const updateChatSummary = useCallback(
+    (shouldIncrement: boolean) => {
+      queryClient.setQueryData(
+        queryKeys.chats(),
+        (current: ChatSummary[] = []) =>
+          current.map((chat: ChatSummary) =>
+            chat.id === chatId
+              ? {
+                  ...chat,
+                  message_count: shouldIncrement
+                    ? (chat.message_count ?? 0) + 1
+                    : chat.message_count,
+                  last_message_at: new Date().toISOString(),
+                }
+              : chat
+          )
+      );
+    },
+    [chatId, queryClient]
   );
 
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const ensureOptimisticMessages = useCallback(
+    (
+      content: string,
+      attachments: AttachmentPayload[] | undefined,
+      reuseExisting: boolean
+    ): StreamingContext => {
+      const timestamp = new Date().toISOString();
+      const queryKey = queryKeys.chatMessages(chatId);
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+      let optimisticUserId = `temp-user-${nanoid()}`;
+      let placeholderId = `temp-ai-${nanoid()}`;
 
-  useEffect(() => {
-    if (!chatId) return;
+      queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) => {
+        const next = [...current];
 
-    const key = `cgpt:init:${chatId}`;
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return;
+        const findTemp = (role: "user" | "assistant") =>
+          next
+            .slice()
+            .reverse()
+            .find((message) =>
+              role === "user"
+                ? message.role === "user" && message.id.startsWith("temp-user")
+                : message.role === "assistant" &&
+                  message.id.startsWith("temp-ai")
+            );
 
-    let pending: { text?: string; files?: AttachmentPayload[] } | null = null;
-    try {
-      pending = JSON.parse(raw) as { text?: string; files?: AttachmentPayload[] };
-    } catch {
-      pending = { text: raw };
-    }
+        if (reuseExisting) {
+          const tempUser = findTemp("user");
+          if (tempUser) {
+            optimisticUserId = tempUser.id;
+            const index = next.findIndex((item) => item.id === tempUser.id);
+            next[index] = {
+              ...tempUser,
+              content,
+              attachments,
+            };
+          } else {
+            next.push({
+              id: optimisticUserId,
+              role: "user",
+              content,
+              created_at: timestamp,
+              attachments,
+            });
+          }
 
-    if (!pending?.text && !(pending?.files && pending.files.length > 0)) {
-      sessionStorage.removeItem(key);
-      return;
-    }
+          const tempAssistant = findTemp("assistant");
+          if (tempAssistant) {
+            placeholderId = tempAssistant.id;
+            const index = next.findIndex(
+              (item) => item.id === tempAssistant.id
+            );
+            next[index] = {
+              ...tempAssistant,
+              content: tempAssistant.content || "...",
+              status: tempAssistant.status ?? "thinking",
+            };
+          } else {
+            next.push({
+              id: placeholderId,
+              role: "assistant",
+              content: "...",
+              created_at: timestamp,
+              status: "thinking",
+            });
+          }
 
-    const hasSameMessage = messages.some(
-      (message) => message.role === "user" && message.content === pending?.text
-    );
+          return next;
+        }
 
-    if (!hasSameMessage && pending?.text) {
-      sendMessageMutation.mutate({
-        content: pending.text,
-        attachments: pending.files,
+        next.push({
+          id: optimisticUserId,
+          role: "user",
+          content,
+          created_at: timestamp,
+          attachments,
+        });
+
+        next.push({
+          id: placeholderId,
+          role: "assistant",
+          content: "...",
+          created_at: timestamp,
+          status: "thinking",
+        });
+
+        return next;
       });
+
+      return { optimisticUserId, placeholderId };
+    },
+    [chatId, queryClient]
+  );
+
+  const ensureAssistantMessage = useCallback(
+    (
+      messageId: string,
+      context: StreamingContext,
+      updater: (existing: ChatMessage | undefined) => ChatMessage
+    ) => {
+      const queryKey = queryKeys.chatMessages(chatId);
+
+      queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) => {
+        const next = [...current];
+        const placeholderIndex = next.findIndex(
+          (message) => message.id === context.placeholderId
+        );
+        const targetIndex = next.findIndex(
+          (message) => message.id === messageId
+        );
+
+        if (placeholderIndex !== -1 && targetIndex === -1 && messageId) {
+          context.placeholderId = messageId;
+        }
+
+        const index = targetIndex !== -1 ? targetIndex : placeholderIndex;
+
+        if (index === -1) {
+          next.push(updater(undefined));
+          return next;
+        }
+
+        const existing = next[index];
+        const updated = updater(existing);
+        next[index] = {
+          ...updated,
+          id: messageId || updated.id,
+        };
+        return next;
+      });
+    },
+    [chatId, queryClient]
+  );
+
+  const handleStreamEvent = useCallback(
+    (event: StreamEvent, context: StreamingContext) => {
+      const queryKey = queryKeys.chatMessages(chatId);
+
+      switch (event.type) {
+        case "connected": {
+          const serverUser = normalizeMessage(event.user_message);
+          const assistant = event.assistant_message
+            ? normalizeMessage(event.assistant_message)
+            : null;
+
+          queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) => {
+            const next = [...current];
+
+            const optimisticUserIndex = next.findIndex(
+              (message) => message.id === context.optimisticUserId
+            );
+            if (optimisticUserIndex !== -1) {
+              next[optimisticUserIndex] = serverUser;
+              context.optimisticUserId = serverUser.id;
+            } else if (!next.some((message) => message.id === serverUser.id)) {
+              next.push(serverUser);
+            }
+
+            if (assistant) {
+              const placeholderIndex = next.findIndex(
+                (message) => message.id === context.placeholderId
+              );
+
+              const assistantIndex = next.findIndex(
+                (message) => message.id === assistant.id
+              );
+
+              if (assistantIndex !== -1) {
+                // Preserve thinking status from existing message if no content yet
+                const existing = next[assistantIndex];
+                next[assistantIndex] = {
+                  ...assistant,
+                  status: assistant.content
+                    ? assistant.status
+                    : existing?.status ?? "thinking",
+                };
+                context.placeholderId = assistant.id;
+              } else if (placeholderIndex !== -1) {
+                // Preserve thinking status from placeholder if no content yet
+                const existing = next[placeholderIndex];
+                next[placeholderIndex] = {
+                  ...assistant,
+                  status: assistant.content
+                    ? assistant.status
+                    : existing?.status ?? "thinking",
+                };
+                context.placeholderId = assistant.id;
+              } else {
+                next.push({
+                  ...assistant,
+                  status: assistant.content ? assistant.status : "thinking",
+                });
+                context.placeholderId = assistant.id;
+              }
+            }
+
+            return next;
+          });
+          break;
+        }
+
+        case "content_delta": {
+          ensureAssistantMessage(event.message_id, context, (existing) => ({
+            ...(existing ?? {
+              id: event.message_id,
+              role: "assistant",
+              content: "",
+              created_at: new Date().toISOString(),
+            }),
+            content: event.total_content || event.content,
+            status: event.status ?? existing?.status ?? "processing",
+          }));
+          break;
+        }
+
+        case "completion": {
+          ensureAssistantMessage(event.message_id, context, (existing) => ({
+            ...(existing ?? {
+              id: event.message_id,
+              role: "assistant",
+              content: "",
+              created_at: new Date().toISOString(),
+            }),
+            content: event.content,
+            status: event.status,
+          }));
+
+          if (event.queued_ai === false) {
+            queryClient.invalidateQueries({ queryKey });
+          }
+          break;
+        }
+
+        case "error": {
+          queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) =>
+            current.map((message) =>
+              message.id === context.placeholderId
+                ? {
+                    ...message,
+                    content: ERROR_COPY,
+                    status: "error",
+                  }
+                : message
+            )
+          );
+          break;
+        }
+
+        case "timeout": {
+          queryClient.invalidateQueries({ queryKey });
+          break;
+        }
+
+        default:
+          break;
+      }
+    },
+    [chatId, ensureAssistantMessage, queryClient]
+  );
+
+  const sendMessage = useCallback(
+    async (content: string, options: SendMessageOptions = {}) => {
+      if (!chatId) {
+        return;
+      }
+
+      const trimmed = content.trim();
+      if (!trimmed || streamInFlightRef.current) {
+        return;
+      }
+
+      streamInFlightRef.current = true;
+      setIsStreaming(true);
+
+      if (!options.suppressInputReset) {
+        setInputValue("");
+      }
+
+      const reuseExisting = options.reuseExisting ?? false;
+      const context = ensureOptimisticMessages(
+        trimmed,
+        options.attachments,
+        reuseExisting
+      );
+
+      if (!reuseExisting) {
+        updateChatSummary(true);
+      }
+
+      const queryKey = queryKeys.chatMessages(chatId);
+      const controller = new AbortController();
+      streamAbortRef.current = controller;
+
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/chats/${chatId}/messages`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              Accept: "text/event-stream",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              content: trimmed,
+              attachments: options.attachments,
+              model: selectedModel,
+            }),
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("No response body");
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary !== -1) {
+            const rawEvent = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+
+            const dataLine = rawEvent
+              .split("\n")
+              .find((entry) => entry.startsWith("data:"));
+
+            if (dataLine) {
+              const payload = dataLine.replace(/^data:\s*/, "");
+              try {
+                const parsed = parseStreamEvent(JSON.parse(payload));
+                if (parsed) {
+                  handleStreamEvent(parsed, context);
+                }
+              } catch (error) {
+                console.error("Stream parse error", error);
+              }
+            }
+
+            boundary = buffer.indexOf("\n\n");
+          }
+        }
+
+        queryClient.invalidateQueries({ queryKey });
+      } catch (error) {
+        console.error("Streaming error", error);
+        queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) =>
+          current.map((message) =>
+            message.id === context.placeholderId
+              ? {
+                  ...message,
+                  content: ERROR_COPY,
+                  status: "error",
+                }
+              : message
+          )
+        );
+      } finally {
+        controller.abort();
+        streamAbortRef.current = null;
+        streamInFlightRef.current = false;
+        setIsStreaming(false);
+      }
+    },
+    [
+      chatId,
+      ensureOptimisticMessages,
+      handleStreamEvent,
+      queryClient,
+      selectedModel,
+      updateChatSummary,
+    ]
+  );
+
+  useEffect(() => {
+    if (initialMessage && !initialStreamTriggeredRef.current) {
+      initialStreamTriggeredRef.current = true;
+      void sendMessage(initialMessage, {
+        reuseExisting: true,
+        suppressInputReset: true,
+      });
+      router.replace(`/chat/${chatId}`);
     }
+  }, [chatId, initialMessage, router, sendMessage]);
 
-    sessionStorage.removeItem(key);
-  }, [chatId, messages, sendMessageMutation]);
+  useEffect(
+    () => () => {
+      streamAbortRef.current?.abort();
+    },
+    []
+  );
 
-  const handleSend = (
-    text: string,
-    model: string,
-    attachments?: AttachmentPayload[]
-  ) => {
-    if (!chatId || !text.trim()) {
-      return;
-    }
-    switchModel(model);
-    sendMessageMutation.mutate({ content: text, attachments });
-  };
+  const handleSubmit = useCallback(async () => {
+    await sendMessage(inputValue);
+  }, [inputValue, sendMessage]);
 
-  const handleEdit = (messageId: string, text: string) => {
-    if (!chatId || !text.trim()) {
-      return;
-    }
-    editMessageMutation.mutate({ messageId, content: text });
-  };
-
-  if (!chat) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">Chat not found</div>
-      </div>
-    );
-  }
-
-  const showLoader = isLoading || sendMessageMutation.isPending || isFetching;
+  const handleKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        void handleSubmit();
+      }
+    },
+    [handleSubmit]
+  );
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b p-4">
-        <h1 className="text-lg font-semibold">{chat.title}</h1>
-        <p className="text-sm text-muted-foreground">Model: {selectedModel}</p>
-      </div>
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="border-border bg-card border-b p-4">
+        <h1 className="text-lg font-semibold text-foreground">
+          Chat {chatId.slice(0, 8)}...
+        </h1>
+      </header>
 
-      <Conversation className="flex-1">
-        <ConversationContent className="mx-auto w-full max-w-2xl space-y-4">
-          {isError && error instanceof Error && (
-            <div className="text-red-500 text-sm p-2 bg-red-50 rounded border">
-              Error: {error.message}
-            </div>
-          )}
+      <section className="flex-1 space-y-4 overflow-y-auto px-4 py-6">
+        {isLoading && orderedMessages.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
+            <TextShimmer>Loading messages...</TextShimmer>
+          </div>
+        ) : (
+          orderedMessages.map((message) => (
+            <MessageBubble key={message.id} message={message} />
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </section>
 
-          {messages.length === 0 && !showLoader ? (
-            <ConversationEmptyState
-              title="No messages yet"
-              description="Start a conversation by typing a message below"
-            />
-          ) : (
-            messages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                onEdit={(newText) => handleEdit(message.id, newText)}
-              />
-            ))
-          )}
-
-          {showLoader && (
-            <div className="text-center text-gray-500">Loading...</div>
-          )}
-
-          <div ref={endRef} />
-        </ConversationContent>
-
-        <ConversationScrollButton />
-      </Conversation>
-
-      <div className="border-t p-4 flex justify-center">
-        <AI_Prompt
-          placeholder="Message ChatGPT"
-          onSubmit={handleSend}
-          onModelChange={switchModel}
-          defaultModel={selectedModel}
-          disabled={sendMessageMutation.isPending}
-        />
-      </div>
+      <footer className="border-border bg-card border-t p-4">
+        <div className="flex items-end gap-2">
+          <textarea
+            value={inputValue}
+            onChange={(event) => setInputValue(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              isStreaming ? "AI is responding..." : "Type a message..."
+            }
+            className="border-input text-foreground focus:ring-ring flex-1 resize-none rounded-lg border bg-background p-3 focus:outline-none focus:ring-2"
+            rows={2}
+            disabled={isStreaming}
+          />
+          <button
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={isStreaming || !inputValue.trim()}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground rounded-lg px-4 py-2 transition-colors"
+          >
+            {isStreaming ? "..." : "Send"}
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }
