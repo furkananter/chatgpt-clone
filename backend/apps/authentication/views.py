@@ -30,22 +30,52 @@ from .utils import get_client_ip, get_user_agent
 
 logger = logging.getLogger(__name__)
 
+# Custom JSON encoder to handle datetime and UUID objects
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, UUID):
+            return str(obj)
+        return super().default(obj)
+
 auth_router = Router(tags=["Authentication"])
 
 
 class AuthBearer(HttpBearer):
-    async def authenticate(self, request, token):
+    async def __call__(self, request):
+        token = None
+
+        auth_header = request.headers.get(self.header)
+        if auth_header and auth_header.lower().startswith(f"{self.openapi_scheme} "):
+            token = auth_header.split(" ", 1)[1].strip()
+
+        if not token:
+            token = request.COOKIES.get('chatgpt_auth')
+
+        if not token:
+            cookie_header = request.META.get('HTTP_COOKIE', '')
+            if 'chatgpt_auth=' in cookie_header:
+                for cookie_part in cookie_header.split(';'):
+                    if 'chatgpt_auth=' in cookie_part.strip():
+                        token = cookie_part.split('=', 1)[1].strip()
+                        break
+
+        if not token:
+            raise HttpError(401, "No authentication token provided")
+
+        return await self.authenticate(request, token)
+
+    async def authenticate(self, request, token=None):
         try:
             payload = JWTService.decode_token(token)
             user_id = payload["user_id"]
 
-            # Use direct database access - Django Ninja authentication is sync
             user = await User.objects.aget(id=user_id)
-            logger.debug(f"Token validated for user: {user.email}")
             return user
 
         except InvalidTokenError as exc:
-            logger.warning(f"Invalid token provided: {exc}")
+            logger.warning("Invalid token provided")
             raise HttpError(401, "Invalid token")
         except User.DoesNotExist:
             logger.warning(f"Token valid but user {user_id} not found")
@@ -78,12 +108,32 @@ async def google_oauth(request, data: GoogleOAuthRequest):
         tokens = JWTService.generate_tokens(user, session.session_id)
         logger.info(f"JWT tokens generated for user: {user.email}")
 
-        return AuthResponse(
-            access_token=tokens["access"],
-            refresh_token=tokens["refresh"],
-            user=UserProfileResponse.from_orm(user),
-            expires_in=settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds(),
+        auth_data = {
+            "access_token": tokens["access"],
+            "refresh_token": tokens["refresh"],
+            "user": UserProfileResponse.from_orm(user).dict(),
+            "expires_in": settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds(),
+        }
+
+        # Create JSON response with cookies using custom encoder for UUID handling
+        response_obj = HttpResponse(json.dumps(auth_data, cls=DateTimeEncoder), content_type='application/json')
+        response_obj.set_cookie(
+            'chatgpt_auth',
+            tokens["access"],
+            max_age=int(settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds()),
+            httponly=True,
+            secure=not settings.DEBUG,  # HTTPS in production
+            samesite='Lax'
         )
+        response_obj.set_cookie(
+            'chatgpt_refresh',
+            tokens["refresh"],
+            max_age=60*60*24*7,  # 7 days
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite='Lax'
+        )
+        return response_obj
     except GoogleOAuthError as exc:
         logger.error(f"OAuth validation failed: {exc}")
         raise HttpError(400, f"OAuth validation failed: {exc}")
@@ -92,10 +142,18 @@ async def google_oauth(request, data: GoogleOAuthRequest):
         raise HttpError(500, "Authentication failed") from exc
 
 
-@auth_router.post("/refresh", response=AuthResponse)
-async def refresh_token(request, data: TokenRefreshRequest):
+@auth_router.post("/refresh")
+async def refresh_token(request, data: TokenRefreshRequest = None):
     try:
-        payload = JWTService.decode_refresh_token(data.refresh_token)
+        # Try to get refresh token from cookie first, then fallback to request body
+        refresh_token = request.COOKIES.get('chatgpt_refresh')
+        if not refresh_token and data:
+            refresh_token = data.refresh_token
+
+        if not refresh_token:
+            raise HttpError(401, "No refresh token provided")
+
+        payload = JWTService.decode_refresh_token(refresh_token)
         user = await User.objects.aget(id=payload["user_id"])
 
         session = await UserSession.objects.aget(
@@ -105,20 +163,62 @@ async def refresh_token(request, data: TokenRefreshRequest):
             expires_at__gt=timezone.now(),
         )
         tokens = JWTService.generate_tokens(user, session.session_id)
-        return AuthResponse(
-            access_token=tokens["access"],
-            refresh_token=tokens["refresh"],
-            user=UserProfileResponse.from_orm(user),
-            expires_in=settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds(),
+
+        auth_data = {
+            "access_token": tokens["access"],
+            "refresh_token": tokens["refresh"],
+            "user": UserProfileResponse.from_orm(user).dict(),
+            "expires_in": settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds(),
+        }
+
+        # Create JSON response with cookies for refresh endpoint too
+        response_obj = HttpResponse(json.dumps(auth_data, cls=DateTimeEncoder), content_type='application/json')
+        response_obj.set_cookie(
+            'chatgpt_auth',
+            tokens["access"],
+            max_age=int(settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds()),
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite='Lax'
         )
+        response_obj.set_cookie(
+            'chatgpt_refresh',
+            tokens["refresh"],
+            max_age=60*60*24*7,  # 7 days
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite='Lax'
+        )
+        return response_obj
     except (InvalidTokenError, UserSession.DoesNotExist):
         raise HttpError(401, "Invalid refresh token")
 
 
 @auth_router.post("/logout")
 async def logout(request):
-    """Simple logout endpoint - JWT is stateless, client should discard token"""
-    return {"message": "Successfully logged out"}
+    """Expire auth cookies and deactivate the session if we can."""
+
+    response_payload = json.dumps({"message": "Successfully logged out"})
+    response = HttpResponse(response_payload, content_type="application/json")
+
+    # Expire cookies on the client
+    response.delete_cookie("chatgpt_auth", samesite="Lax")
+    response.delete_cookie("chatgpt_refresh", samesite="Lax")
+
+    # Best-effort session invalidation using either cookie
+    token = request.COOKIES.get("chatgpt_refresh") or request.COOKIES.get("chatgpt_auth")
+    if token:
+        try:
+            payload = JWTService.decode_token(token)
+            session_id = payload.get("session_id")
+            if session_id:
+                await UserSessionService.invalidate_session(UUID(session_id))
+        except InvalidTokenError:
+            logger.info("Logout called with invalid token")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(f"Failed to invalidate session during logout: {exc}")
+
+    return response
 
 
 def _get_frontend_origin() -> str:
@@ -147,15 +247,6 @@ def _success_response(tokens: dict, user: User) -> HttpResponse:
     }
 
     target_origin = json.dumps(_get_frontend_origin())
-
-    # Custom JSON encoder to handle datetime and UUID objects
-    class DateTimeEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            elif isinstance(obj, UUID):
-                return str(obj)
-            return super().default(obj)
 
     payload_json = json.dumps(payload, cls=DateTimeEncoder)
 
@@ -270,21 +361,44 @@ async def google_oauth_callback(request):
 
         tokens = JWTService.generate_tokens(user, session.session_id)
 
-        # Redirect to frontend with tokens in URL params
+        # Redirect to frontend with tokens in URL params AND set cookies
         frontend_url = _get_frontend_origin()
         redirect_url = f"{frontend_url}/auth/callback?token={tokens['access']}&refresh_token={tokens['refresh']}&user_id={user.id}"
 
-        return HttpResponseRedirect(redirect_url)
+        response = HttpResponseRedirect(redirect_url)
+        response.set_cookie(
+            'chatgpt_auth',
+            tokens["access"],
+            max_age=int(settings.JWT_ACCESS_TOKEN_LIFETIME.total_seconds()),
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite='Lax'
+        )
+        response.set_cookie(
+            'chatgpt_refresh',
+            tokens["refresh"],
+            max_age=60*60*24*7,  # 7 days
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite='Lax'
+        )
+        return response
 
     except Exception as exc:
         logger.exception("OAuth callback processing failed")
         return _error_response("Authentication failed")
 
 
-@auth_router.get("/me", response=UserProfileResponse, auth=AuthBearer())
+# Create a global instance of AuthBearer for reuse
+auth_bearer_instance = AuthBearer()
+
+@auth_router.get("/me", response=UserProfileResponse, auth=auth_bearer_instance)
 async def get_current_user(request):
     """Get current authenticated user"""
+    logger.warning(f"🎯 /me endpoint reached! Request method: {request.method}")
+    logger.warning(f"🎯 Request cookies in /me: {list(request.COOKIES.keys())}")
+    logger.warning(f"🎯 Raw cookie header in /me: {request.META.get('HTTP_COOKIE', 'NOT_FOUND')}")
+
     user = request.auth
     logger.info(f"Authenticated user request: {user.email} (ID: {user.id})")
     return UserProfileResponse.from_orm(user)
-

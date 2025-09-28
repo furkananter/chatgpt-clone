@@ -6,7 +6,7 @@ from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from apps.authentication.models import User
-from apps.authentication.views import AuthBearer
+from apps.authentication.views import auth_bearer_instance
 from shared.rate_limiting import apply_rate_limit
 from shared.exceptions import RateLimitExceededError
 
@@ -25,7 +25,7 @@ from .services import ChatService, MessageService, ModelNotAvailableError
 chat_router = Router(tags=["Chats"])
 
 
-@chat_router.get("/", response=List[ChatListResponse], auth=AuthBearer())
+@chat_router.get("/", response=List[ChatListResponse], auth=auth_bearer_instance)
 @paginate(PageNumberPagination, page_size=20)
 async def list_chats(request):
     user = request.auth
@@ -36,7 +36,7 @@ async def chat_list_sync(chats):
     return [chat async for chat in chats]
 
 
-@chat_router.post("/", response=ChatResponse, auth=AuthBearer())
+@chat_router.post("/", response=ChatResponse, auth=auth_bearer_instance)
 @apply_rate_limit(namespace="create_chat", limit=10, window=60)  # 10 chats per minute
 async def create_chat(request, data: ChatCreateRequest):
     user = request.auth
@@ -66,7 +66,7 @@ async def create_chat(request, data: ChatCreateRequest):
         raise HttpError(429, "Rate limit exceeded")
 
 
-@chat_router.get("/{chat_id}/messages", response=List[MessageResponse], auth=AuthBearer())
+@chat_router.get("/{chat_id}/messages", response=List[MessageResponse], auth=auth_bearer_instance)
 async def get_chat_messages(request, chat_id: str):
     user = request.auth
     try:
@@ -95,7 +95,7 @@ async def message_list_sync(messages):
     return [message async for message in messages]
 
 
-@chat_router.post("/{chat_id}/messages", response=MessageResponse, auth=AuthBearer())
+@chat_router.post("/{chat_id}/messages", response=MessageResponse, auth=auth_bearer_instance)
 @apply_rate_limit(namespace="send_message", limit=20, window=60)  # 20 messages per minute
 async def send_message(request, chat_id: str, data: MessageCreateRequest):
     user = request.auth

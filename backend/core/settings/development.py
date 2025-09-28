@@ -3,7 +3,17 @@ from .base import *  # noqa
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
-CORS_ALLOW_ALL_ORIGINS = True
+
+# Allow specific origins for development
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+CORS_ALLOW_CREDENTIALS = True
+
+# Disable allowing all origins to enforce the list above
+CORS_ALLOW_ALL_ORIGINS = False
+
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
