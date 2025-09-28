@@ -1,0 +1,13 @@
+{
+  "name": "chatgpt-backend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "install:python": "pip3 install -r requirements/development.txt",
+    "migrate": "python3 manage.py migrate",
+    "seed": "python3 scripts/seed_data.py",
+    "dev": "python3 manage.py runserver 8000",
+    "celery": "celery -A core worker -l info",
+    "lint": "black . && isort ."
+  }
+}

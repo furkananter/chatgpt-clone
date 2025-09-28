@@ -1,0 +1,234 @@
+import asyncio
+import json
+import logging
+from typing import Any, AsyncGenerator, Dict, List, Optional
+
+import httpx
+from django.conf import settings
+
+from apps.chats.models import Message
+
+from .models import AIModel, ConversationMemory, UsageTracking
+
+logger = logging.getLogger(__name__)
+
+try:  # pragma: no cover - optional dependency
+    from mem0 import Memory
+except ImportError:  # pragma: no cover - fallback behaviour
+    Memory = None  # type: ignore
+
+
+class OpenRouterAPIError(Exception):
+    pass
+
+
+class OpenRouterService:
+    BASE_URL = "https://openrouter.ai/api/v1"
+
+    @classmethod
+    def get_headers(cls) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+            "HTTP-Referer": settings.SITE_URL,
+            "X-Title": "ChatGPT Clone",
+            "Content-Type": "application/json",
+        }
+
+    @classmethod
+    async def stream_completion(
+        cls,
+        *,
+        model: str,
+        messages: List[Dict[str, str]],
+        memory_context: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        **kwargs,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        system_message = {
+            "role": "system",
+            "content": f"You are a helpful AI assistant. {memory_context}",
+        }
+        payload = {
+            "model": model,
+            "messages": [system_message] + messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        payload.update(kwargs)
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{cls.BASE_URL}/chat/completions",
+                    headers=cls.get_headers(),
+                    json=payload,
+                ) as response:
+                    if response.status_code != 200:
+                        error_body = await response.aread()
+                        raise OpenRouterAPIError(
+                            f"API request failed: {response.status_code} - {error_body.decode()}"
+                        )
+
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data = line[6:]
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            yield chunk
+                        except json.JSONDecodeError:
+                            logger.debug("Invalid JSON chunk: %s", data)
+                            continue
+        except httpx.TimeoutException as exc:  # pragma: no cover
+            raise OpenRouterAPIError("Request timeout") from exc
+        except httpx.RequestError as exc:  # pragma: no cover
+            raise OpenRouterAPIError(f"Request error: {exc}") from exc
+
+    @classmethod
+    async def get_available_models(cls) -> List[Dict[str, Any]]:
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                response = await client.get(f"{cls.BASE_URL}/models", headers=cls.get_headers())
+                response.raise_for_status()
+                data = response.json()
+                return data.get("data", [])
+        except Exception as exc:  # pragma: no cover
+            logger.error("Error fetching models: %s", exc)
+            return []
+
+    @classmethod
+    async def estimate_cost(cls, *, model: str, input_tokens: int, output_tokens: int = 0) -> float:
+        try:
+            ai_model = await AIModel.objects.aget(openrouter_model_id=model)
+            input_cost = (input_tokens / 1_000_000) * float(ai_model.input_price_per_million)
+            output_cost = (output_tokens / 1_000_000) * float(ai_model.output_price_per_million)
+            return input_cost + output_cost
+        except AIModel.DoesNotExist:
+            logger.warning("Model %s not found in database", model)
+            return 0.0
+
+
+class MemoryServiceError(Exception):
+    pass
+
+
+class Mem0Service:
+    def __init__(self):
+        if Memory is None:
+            self.memory = None
+        else:
+            config = {
+                "vector_store": {
+                    "provider": "qdrant",
+                    "config": {
+                        "url": settings.QDRANT_HOST,
+                        "api_key": settings.QDRANT_API_KEY,
+                    },
+                },
+                "llm": {
+                    "provider": "openai",
+                    "config": {
+                        "model": "gpt-3.5-turbo",
+                        "api_key": settings.OPENAI_API_KEY,
+                    },
+                },
+            }
+            self.memory = Memory.from_config(config)
+
+    async def _run_async(self, func, *args, **kwargs):
+        if self.memory is None:
+            return None
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+
+    async def create_memory_context(self, user_id: str, chat_id: str) -> Optional[str]:
+        memory_id = f"{user_id}_{chat_id}"
+        if self.memory is None:
+            return memory_id
+        try:
+            await self._run_async(
+                self.memory.add,
+                messages=[{"role": "system", "content": "New conversation started"}],
+                user_id=memory_id,
+            )
+            await ConversationMemory.objects.aupdate_or_create(
+                chat_id=chat_id,
+                defaults={"mem0_memory_id": memory_id},
+            )
+            return memory_id
+        except Exception as exc:  # pragma: no cover
+            logger.error("Failed to create memory context: %s", exc)
+            raise MemoryServiceError(str(exc)) from exc
+
+    async def add_conversation_memory(self, memory_id: str, messages: List[Message], user_id: str):
+        if self.memory is None:
+            return
+        payload = [{"role": msg.role, "content": msg.content} for msg in messages]
+        await self._run_async(self.memory.add, messages=payload, user_id=memory_id)
+
+    async def get_relevant_memories(self, memory_id: str, query: str, limit: int = 5) -> str:
+        if self.memory is None:
+            return ""
+        try:
+            memories = await self._run_async(
+                self.memory.search,
+                query=query,
+                user_id=memory_id,
+                limit=limit,
+            )
+            context_parts = [f"Memory: {item['text']}" for item in memories or []]
+            return "\n".join(context_parts)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to retrieve memories: %s", exc)
+            return ""
+
+    async def update_memory(
+        self,
+        memory_id: str,
+        memory_text: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self.memory is None:
+            return
+        await self._run_async(
+            self.memory.update,
+            memory_id=memory_id,
+            data=memory_text,
+            metadata=metadata or {},
+        )
+
+    async def delete_memory_context(self, memory_id: str) -> None:
+        if self.memory is None:
+            return
+        await self._run_async(self.memory.delete_all, user_id=memory_id)
+
+
+async def record_usage(
+    *,
+    user_id: str,
+    chat_id: Optional[str],
+    message_id: Optional[str],
+    model: str,
+    operation_type: str,
+    tokens: int,
+    cost: float,
+    response_time_ms: int = 0,
+    was_cached: bool = False,
+) -> UsageTracking:
+    return await UsageTracking.objects.acreate(
+        user_id=user_id,
+        chat_id=chat_id,
+        message_id=message_id,
+        model_used=model,
+        operation_type=operation_type,
+        total_tokens=tokens,
+        estimated_cost=cost,
+        response_time_ms=response_time_ms,
+        was_cached=was_cached,
+    )
+

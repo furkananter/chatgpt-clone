@@ -1,0 +1,19 @@
+{
+  "name": "chatgpt-clone-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "install:all": "pnpm install --recursive",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:backend": "pnpm --filter backend run dev",
+    "dev": "concurrently \"pnpm --prefix frontend dev\" \"dotenv -e backend/.env -- python3 backend/manage.py runserver 8000\"",
+    "migrate": "dotenv -e backend/.env -- python3 backend/manage.py migrate",
+    "seed": "pnpm --filter backend run seed",
+    "celery": "pnpm --filter backend run celery",
+    "lint": "pnpm run --recursive lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "dotenv-cli": "^10.0.0"
+  }
+}
