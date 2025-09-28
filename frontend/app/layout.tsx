@@ -4,6 +4,7 @@ import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { ClientLayoutProvider } from "@/components/providers/client-layout-provider"; // Assuming this is the correct path
+import { QueryProvider } from "@/components/providers/query-provider";
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -18,9 +19,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans ${GeistSans.variable} ${GeistMono.variable}`}>
-        <AuthProvider>
-          <ClientLayoutProvider>{children}</ClientLayoutProvider>
-        </AuthProvider>
+        <QueryProvider>
+          <AuthProvider>
+            <ClientLayoutProvider>{children}</ClientLayoutProvider>
+          </AuthProvider>
+        </QueryProvider>
       </body>
     </html>
   );

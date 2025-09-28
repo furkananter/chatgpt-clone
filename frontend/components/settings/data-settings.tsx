@@ -7,12 +7,12 @@ import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, Download, Upload, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useChatStore } from "@/lib/stores/chat-store";
+import { useChats } from "@/hooks/use-chats";
 
 export function DataSettings() {
   const [dataCollection, setDataCollection] = useState(true);
   const [improveModel, setImproveModel] = useState(false);
-  const { chats } = useChatStore();
+  const { chats } = useChats();
 
   const handleExportData = () => {
     const data = {

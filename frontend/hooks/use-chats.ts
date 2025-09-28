@@ -1,51 +1,47 @@
-import { apiClient } from '@/lib/api';
-import { useAuthStore } from '@/lib/stores/auth-store';
-import { useState, useEffect } from 'react';
+"use client";
 
-// ... (type definitions)
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-async function fetchChats(): Promise<UIChat[]> {
-  const data = await apiClient.get('/api/v1/chats/');
-  return (data.items || data).map((chat: any) => ({
-    id: chat.id,
-    title: chat.title,
-    model_used: chat.model_used,
-    is_archived: chat.is_archived,
-    is_pinned: chat.is_pinned,
-    message_count: chat.message_count,
-    last_message_at: chat.last_message_at,
-    created_at: chat.created_at,
-  }));
-}
+import {
+  createChat,
+  fetchChats,
+  type ChatSummary,
+  type CreateChatPayload,
+} from "@/lib/api/chat";
+import { queryKeys } from "@/lib/query/client";
 
-export function useChats(): UseChatsResponse {
-  const [chats, setChats] = useState<UIChat[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isError, setIsError] = useState(false);
-
-  const mutate = async () => {
-    setIsLoading(true);
-    setIsError(false);
-
-    try {
-      const data = await fetchChats();
-      setChats(data);
-    } catch (error) {
-      console.error("Error fetching chats:", error);
-      setIsError(true);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    mutate();
-  }, []);
+export const useChats = () => {
+  const query = useQuery<ChatSummary[]>({
+    queryKey: queryKeys.chats(),
+    queryFn: ({ signal }) => fetchChats(signal),
+  });
 
   return {
-    chats,
-    isLoading,
-    isError,
-    mutate,
+    chats: query.data ?? [],
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    error: query.error,
+    refetch: query.refetch,
   };
-}
+};
+
+export const useCreateChatMutation = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateChatPayload) => createChat(payload),
+    onSuccess: (chat) => {
+      queryClient.setQueryData<ChatSummary[]>(queryKeys.chats(), (current) => {
+        if (!current) {
+          return [chat];
+        }
+        const exists = current.some((item) => item.id === chat.id);
+        return exists ? current : [chat, ...current];
+      });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chats() });
+    },
+  });
+};

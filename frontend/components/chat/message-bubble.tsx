@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { MemoizedMarkdown } from "@/components/memoized-markdown";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 import {
   Copy,
   Pencil,
@@ -87,30 +89,44 @@ export function MessageBubble({
                 </button>
               </div>
             </div>
+          ) : message.content === "..." ? (
+            <TextShimmer duration={1.5}>Thinking...</TextShimmer>
           ) : (
             <MemoizedMarkdown id={message.id} content={message.content} />
           )}
         </div>
 
         {/* Floating Edit/Copy Buttons */}
-        {isUser && !editing && !hasImage && hovered && (
-          <div className="absolute bottom-[-32px] right-0 z-10 flex gap-2 bg-primary mt-2 px-3 py-1 rounded-full">
-            <button
-              onClick={() => setEditing(true)}
-              className="text-white hover:bg-secondary rounded-md px-2 py-1"
-              title="Edit"
+        <AnimatePresence>
+          {isUser && !editing && !hasImage && hovered && (
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.9 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="absolute bottom-[-32px] right-0 z-10 flex gap-2 bg-background border border-border px-3 py-1.5 rounded-full shadow-lg"
             >
-              <Pencil className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleCopy}
-              className="text-white hover:bg-secondary rounded-md px-2 py-1"
-              title="Copy"
-            >
-              <Copy className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setEditing(true)}
+                className="text-foreground hover:text-primary rounded-md px-2 py-1 transition-colors"
+                title="Edit"
+              >
+                <Pencil className="w-4 h-4" />
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleCopy}
+                className="text-foreground hover:text-primary rounded-md px-2 py-1 transition-colors"
+                title="Copy"
+              >
+                <Copy className="w-4 h-4" />
+              </motion.button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

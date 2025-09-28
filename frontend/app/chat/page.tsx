@@ -2,54 +2,52 @@
 "use client";
 
 import { ContentHeader } from "@/components/chat/content-header";
-import { ChatInput } from "@/components/chat/chat-input";
+import { AI_Prompt } from "@/components/ui/animated-ai-input";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useEffect } from "react";
+import { useCreateChatMutation } from "@/hooks/use-chats";
+import { type AttachmentPayload } from "@/lib/api/chat";
 
 export default function ChatHomePage() {
   const router = useRouter();
-  const { user, isAuthenticated, token } = useAuthStore();
-  const { selectedModel, loadChats } = useChatStore();
+  const { user, isAuthenticated } = useAuthStore();
+  const { selectedModel, switchModel } = useChatStore();
+  const createChatMutation = useCreateChatMutation();
 
-  // Redirect to login if not authenticated
-  useEffect(() => {
+  // // Redirect to login if not authenticated
+  // useEffect(() => {
+  //   if (!isAuthenticated) {
+  //     router.push("/");
+  //   }
+  // }, [isAuthenticated, router]);
+
+  const startChat = async (
+    text: string,
+    selectedModel: string,
+    attachments?: AttachmentPayload[]
+  ) => {
     if (!isAuthenticated) {
-      router.push("/login");
-    }
-  }, [isAuthenticated, router]);
-
-  const startChat = async (text: string, files?: any[]) => {
-    if (!isAuthenticated || !token) {
       console.log("Not authenticated");
-      router.push("/login");
+      router.push("/");
       return;
     }
 
-    const BACKEND_URL =
-      process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-
     try {
-      const response = await fetch(`${BACKEND_URL}/api/v1/chats/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title: text.slice(0, 50) + (text.length > 50 ? "..." : ""),
-          initial_message: text,
-          model: selectedModel,
-        }),
+      const chat = await createChatMutation.mutateAsync({
+        title: text.slice(0, 50) + (text.length > 50 ? "..." : ""),
+        initial_message: text,
+        model: selectedModel,
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to create chat");
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem(
+          `cgpt:init:${chat.id}`,
+          JSON.stringify({ text })
+        );
       }
 
-      const chat = await response.json();
-      await loadChats(); // Refresh the chat list
       router.push(`/chat/${chat.id}`);
     } catch (error) {
       console.error("Error creating chat:", error);
@@ -64,7 +62,13 @@ export default function ChatHomePage() {
           {"What's on the agenda today?"}
         </h1>
         <div className="mx-auto w-full max-w-2xl">
-          <ChatInput placeholder="Ask anything" onSubmit={startChat} />
+          <AI_Prompt
+            placeholder="Ask anything"
+            onSubmit={startChat}
+            onModelChange={switchModel}
+            defaultModel={selectedModel}
+            disabled={createChatMutation.isPending}
+          />
         </div>
       </main>
       <footer className="text-center text-xs text-muted-foreground px-4 pb-3 pt-2">

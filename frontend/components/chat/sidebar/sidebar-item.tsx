@@ -4,9 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Ellipsis } from "lucide-react";
-import { Chat } from "@/lib/stores/chat-store";
+import { type ChatSummary } from "@/lib/api/chat";
 
-export function SidebarItem({ chat }: { chat: Chat }) {
+export function SidebarItem({ chat }: { chat: ChatSummary }) {
   const pathname = usePathname();
   const active = pathname?.endsWith(chat.id);
 
@@ -14,10 +14,10 @@ export function SidebarItem({ chat }: { chat: Chat }) {
     <Link
       href={`/chat/${chat.id}`}
       className={cn(
-        "group flex items-center hover:bg-primary justify-between rounded-xl px-3 py-2 text-sm",
+        "group flex items-center hover:bg-muted justify-between rounded-xl px-3 py-2 text-sm cursor-pointer",
         active
-          ? "bg-secondary text-secondary-foreground"
-          : "text-secondary-foreground hover:bg-secondary"
+          ? "bg-muted text-secondary-foreground"
+          : "text-secondary-foreground hover:bg-muted"
       )}
     >
       <span className="truncate font-normal">{chat.title}</span>

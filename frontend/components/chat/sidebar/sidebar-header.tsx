@@ -10,7 +10,7 @@ export const SidebarHeader: React.FC = () => {
         <Button
           asChild
           variant="ghost"
-          className="flex items-center font-normal justify-start rounded-xl hover:text-white text-zinc-200 hover:bg-secondary"
+          className="flex items-center font-normal justify-start rounded-xl hover:text-foreground text-muted-foreground hover:bg-muted"
         >
           <Link href="/chat" className="flex items-center gap-2">
             <SquarePen className="h-4 w-4" />
@@ -20,7 +20,7 @@ export const SidebarHeader: React.FC = () => {
 
         <Button
           variant="ghost"
-          className="flex items-center font-normal justify-start rounded-xl hover:text-white text-white hover:bg-secondary"
+          className="flex items-center font-normal justify-start rounded-xl hover:text-foreground text-muted-foreground hover:bg-muted"
         >
           <Search className="h-4 w-4" />
           Search chats
@@ -28,7 +28,7 @@ export const SidebarHeader: React.FC = () => {
         <br />
         <Button
           variant="ghost"
-          className="flex items-center font-normal justify-start rounded-xl hover:text-white text-white hover:bg-secondary"
+          className="flex items-center font-normal justify-start rounded-xl hover:text-foreground text-muted-foreground hover:bg-muted"
         >
           <LibraryIcon />
           Library
@@ -36,7 +36,7 @@ export const SidebarHeader: React.FC = () => {
 
         <Button
           variant="ghost"
-          className="flex items-center font-normal justify-start rounded-xl hover:text-white text-white hover:bg-secondary"
+          className="flex items-center font-normal justify-start rounded-xl hover:text-foreground text-muted-foreground hover:bg-muted"
         >
           <VideoIcon />
           Sora
@@ -44,7 +44,7 @@ export const SidebarHeader: React.FC = () => {
 
         <Button
           variant="ghost"
-          className="flex items-center font-normal justify-start rounded-xl hover:text-white text-white hover:bg-secondary"
+          className="flex items-center font-normal justify-start rounded-xl hover:text-foreground text-muted-foreground hover:bg-muted"
         >
           <GPTsIcon />
           GPTs

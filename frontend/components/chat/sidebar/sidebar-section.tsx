@@ -1,4 +1,4 @@
-import { Chat } from "@/lib/stores/chat-store";
+import { type ChatSummary } from "@/lib/api/chat";
 import { SidebarItem } from "./sidebar-item";
 
 export function SidebarSection({
@@ -6,7 +6,7 @@ export function SidebarSection({
   chats,
 }: {
   title: string;
-  chats: Chat[];
+  chats: ChatSummary[];
 }) {
   if (!chats?.length) return null;
   return (

@@ -1,10 +1,10 @@
 "use client";
 
 import type React from "react";
-import { Analytics } from "@vercel/analytics/next";
+import { Suspense } from "react";
+
 import { StoreProvider } from "@/components/providers/store-provider";
 import { ThemeProvider } from "@/components/theme-provider";
-import { Suspense } from "react";
 
 export function ClientLayoutProvider({
   children,
@@ -23,7 +23,6 @@ export function ClientLayoutProvider({
           <StoreProvider>{children}</StoreProvider>
         </ThemeProvider>
       </Suspense>
-      <Analytics />
     </>
   );
 }

@@ -2,11 +2,37 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+
+import apiClient from "@/lib/api";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { createUserFromProfile } from "@/lib/stores/auth-store";
+import { queryKeys } from "@/lib/query/client";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { login, popup, setPopup } = useAuthStore();
+  const { login, popup, setPopup, setLoading, isAuthenticated } =
+    useAuthStore();
   const router = useRouter();
+
+  const currentUserQuery = useQuery({
+    queryKey: queryKeys.currentUser(),
+    enabled: !isAuthenticated,
+    retry: false,
+    queryFn: async () => {
+      const userData = await apiClient.get("/api/v1/auth/me");
+      return createUserFromProfile(userData);
+    },
+  });
+
+  useEffect(() => {
+    setLoading(currentUserQuery.isLoading || currentUserQuery.isFetching);
+  }, [currentUserQuery.isLoading, currentUserQuery.isFetching, setLoading]);
+
+  useEffect(() => {
+    if (currentUserQuery.data && !isAuthenticated) {
+      login(currentUserQuery.data);
+    }
+  }, [currentUserQuery.data, isAuthenticated, login]);
 
   useEffect(() => {
     const handleAuthMessage = (event: MessageEvent) => {
@@ -20,24 +46,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const { data } = event;
       if (data && data.type === "AUTH_SUCCESS") {
-        const { access_token, refresh_token, user } = data.payload;
+        const { user } = data.payload;
 
-        const frontendUser = {
-          ...user,
-          name:
-            user.display_name || `${user.first_name} ${user.last_name}`.trim(),
-          avatar: user.avatar_url,
-          plan:
-            user.subscription_tier === "free"
-              ? "Free"
-              : user.subscription_tier === "plus"
-              ? "Plus"
-              : "Pro",
-        };
+        const frontendUser = createUserFromProfile(user);
 
-        // The login function in the store might not accept all these arguments.
-        // Adjusting the call to what was defined previously.
-        login(access_token, refresh_token, frontendUser);
+        // For cookie-based auth, don't pass tokens - they're handled by cookies
+        login(frontendUser);
 
         if (popup && !popup.closed) {
           popup.close();

@@ -48,7 +48,7 @@ export function Sidebar() {
 
   const handleLogout = () => {
     logout();
-    router.push("/login");
+    router.push("/");
   };
 
   return (
@@ -65,7 +65,7 @@ export function Sidebar() {
       <aside
         aria-expanded={isSidebarOpen}
         className={cn(
-          "flex h-full shrink-0 flex-col border-r bg-sidebar transition-[width,transform] duration-200 ease-linear",
+          "flex h-full shrink-0 flex-col border-r border-border bg-background transition-[width,transform] duration-200 ease-linear",
           isDesktop
             ? isSidebarOpen
               ? "w-64"
@@ -87,7 +87,7 @@ export function Sidebar() {
               <div className="flex justify-between w-full items-center">
                 {isSidebarOpen && (
                   <button
-                    className="p-2 hover:bg-secondary rounded-md hover:cursor-pointer"
+                    className="p-2 hover:bg-muted rounded-md hover:cursor-pointer"
                     type="button"
                     onClick={() => router.push("/chat")}
                   >
@@ -97,7 +97,7 @@ export function Sidebar() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="hover:text-sidebar-foreground text-sidebar-foreground hover:bg-sidebar-accent hover:cursor-pointer"
+                  className="hover:text-foreground text-foreground hover:bg-muted hover:cursor-pointer"
                   onClick={toggleSidebar}
                   aria-label="Toggle sidebar"
                 >
@@ -129,7 +129,7 @@ export function Sidebar() {
                       {user.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex flex-col overflow-hidden">
-                      <span className="text-sm text-sidebar-foreground truncate">
+                      <span className="text-sm text-foreground truncate">
                         {user.name}
                       </span>
                       <span className="text-xs text-muted-foreground truncate">
@@ -140,7 +140,7 @@ export function Sidebar() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted"
                     onClick={handleLogout}
                     title="Logout"
                   >
@@ -151,8 +151,8 @@ export function Sidebar() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="hover:text-sidebar-foreground w-full cursor-pointer text-sidebar-foreground hover:bg-sidebar-accent"
-                  onClick={() => router.push("/login")}
+                  className="hover:text-foreground w-full cursor-pointer text-foreground hover:bg-muted"
+                  onClick={() => router.push("/")}
                 >
                   <UsersRound className="h-5 w-5 mr-2" />
                   Sign In
@@ -169,7 +169,7 @@ export function Sidebar() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-sidebar-accent"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted"
                     onClick={handleLogout}
                     title="Logout"
                   >
@@ -180,9 +180,9 @@ export function Sidebar() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-sidebar-foreground hover:bg-sidebar-accent"
+                  className="text-foreground hover:bg-muted"
                   aria-label="Sign in"
-                  onClick={() => router.push("/login")}
+                  onClick={() => router.push("/")}
                 >
                   <UsersRound className="h-5 w-5" />
                 </Button>
