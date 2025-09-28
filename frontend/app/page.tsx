@@ -1,35 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useAuthStore } from "@/lib/stores/auth-store";
-import Link from "next/link";
 import { OpenAILogo } from "@/components/icons";
+import { useGoogleAuth } from "@/hooks/use-google-auth";
 
 export default function HomePage() {
-  const router = useRouter();
-  const { login } = useAuthStore();
-
-  const handleGoogleSignup = () => {
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-    const redirectUri = `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/auth/google/callback`;
-    const scope = "openid email profile";
-    const responseType = "code";
-    const state = Math.random().toString(36).substring(7); // Simple state for CSRF protection
-
-    const googleOAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams(
-      {
-        client_id: clientId!,
-        redirect_uri: redirectUri,
-        response_type: responseType,
-        scope: scope,
-        state: state,
-      }
-    )}`;
-
-    window.location.href = googleOAuthUrl;
-  };
+  const { handleGoogleAuth, error } = useGoogleAuth();
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -51,11 +28,17 @@ export default function HomePage() {
 
         {/* Google OAuth Button */}
         <CardContent className="space-y-3">
+          {error && (
+            <div className="rounded-md bg-red-50 p-4 text-sm text-red-600">
+              {error}
+            </div>
+          )}
+
           <Button
             variant="outline"
             size="lg"
             className="w-full justify-center h-11 bg-transparent"
-            onClick={handleGoogleSignup}
+            onClick={handleGoogleAuth}
           >
             <svg className="mr-3 h-4 w-4" viewBox="0 0 24 24">
               <path
