@@ -1,554 +1,117 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { nanoid } from "nanoid";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
+import { Bot, User } from "lucide-react";
 
-import { MessageBubble } from "@/components/chat/message-bubble";
-import { TextShimmer } from "@/components/ui/text-shimmer";
-import { useChatHistory } from "@/hooks/use-chat-history";
-import { useChatStore } from "@/lib/stores/chat-store";
-import { queryKeys } from "@/lib/query/client";
 import {
-  normalizeMessage,
-  type AttachmentPayload,
-  type ChatMessage,
-  type ChatSummary,
-} from "@/lib/api/chat";
-import { parseStreamEvent, type StreamEvent } from "@/lib/chat-stream";
-
-type StreamingContext = {
-  optimisticUserId: string;
-  placeholderId: string;
-};
-
-interface SendMessageOptions {
-  reuseExisting?: boolean;
-  suppressInputReset?: boolean;
-  attachments?: AttachmentPayload[];
-}
-
-const ERROR_COPY = "Sorry, there was an error. Please try again.";
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import {
+  Message,
+  MessageAvatar,
+  MessageContent,
+} from "@/components/ai-elements/message";
+import { Loader } from "@/components/ai-elements/loader";
+import { Response } from "@/components/ai-elements/response";
+import { PromptBox } from "@/components/ui/chatgpt-prompt-input";
+import { useChatStream } from "@/hooks/use-chat-stream";
 
 export default function ChatPage() {
-  const params = useParams();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const chatId = params.chatId as string;
-  const initialMessage = searchParams.get("message");
-
-  const queryClient = useQueryClient();
-  const setActiveChatId = useChatStore((state) => state.setActiveChatId);
-  const selectedModel = useChatStore((state) => state.selectedModel);
-
-  const [inputValue, setInputValue] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
-
-  const streamInFlightRef = useRef(false);
-  const initialStreamTriggeredRef = useRef(false);
-  const streamAbortRef = useRef<AbortController | null>(null);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const { messages, isLoading } = useChatHistory(chatId, {
-    enabled: !initialMessage,
-  });
-
-  const orderedMessages = useMemo(() => messages ?? [], [messages]);
-
-  useEffect(() => {
-    setActiveChatId(chatId);
-  }, [chatId, setActiveChatId]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [orderedMessages]);
-
-  const updateChatSummary = useCallback(
-    (shouldIncrement: boolean) => {
-      queryClient.setQueryData(
-        queryKeys.chats(),
-        (current: ChatSummary[] = []) =>
-          current.map((chat: ChatSummary) =>
-            chat.id === chatId
-              ? {
-                  ...chat,
-                  message_count: shouldIncrement
-                    ? (chat.message_count ?? 0) + 1
-                    : chat.message_count,
-                  last_message_at: new Date().toISOString(),
-                }
-              : chat
-          )
-      );
-    },
-    [chatId, queryClient]
-  );
-
-  const ensureOptimisticMessages = useCallback(
-    (
-      content: string,
-      attachments: AttachmentPayload[] | undefined,
-      reuseExisting: boolean
-    ): StreamingContext => {
-      const timestamp = new Date().toISOString();
-      const queryKey = queryKeys.chatMessages(chatId);
-
-      let optimisticUserId = `temp-user-${nanoid()}`;
-      let placeholderId = `temp-ai-${nanoid()}`;
-
-      queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) => {
-        const next = [...current];
-
-        const findTemp = (role: "user" | "assistant") =>
-          next
-            .slice()
-            .reverse()
-            .find((message) =>
-              role === "user"
-                ? message.role === "user" && message.id.startsWith("temp-user")
-                : message.role === "assistant" &&
-                  message.id.startsWith("temp-ai")
-            );
-
-        if (reuseExisting) {
-          const tempUser = findTemp("user");
-          if (tempUser) {
-            optimisticUserId = tempUser.id;
-            const index = next.findIndex((item) => item.id === tempUser.id);
-            next[index] = {
-              ...tempUser,
-              content,
-              attachments,
-            };
-          } else {
-            next.push({
-              id: optimisticUserId,
-              role: "user",
-              content,
-              created_at: timestamp,
-              attachments,
-            });
-          }
-
-          const tempAssistant = findTemp("assistant");
-          if (tempAssistant) {
-            placeholderId = tempAssistant.id;
-            const index = next.findIndex(
-              (item) => item.id === tempAssistant.id
-            );
-            next[index] = {
-              ...tempAssistant,
-              content: tempAssistant.content || "...",
-              status: tempAssistant.status ?? "thinking",
-            };
-          } else {
-            next.push({
-              id: placeholderId,
-              role: "assistant",
-              content: "...",
-              created_at: timestamp,
-              status: "thinking",
-            });
-          }
-
-          return next;
-        }
-
-        next.push({
-          id: optimisticUserId,
-          role: "user",
-          content,
-          created_at: timestamp,
-          attachments,
-        });
-
-        next.push({
-          id: placeholderId,
-          role: "assistant",
-          content: "...",
-          created_at: timestamp,
-          status: "thinking",
-        });
-
-        return next;
-      });
-
-      return { optimisticUserId, placeholderId };
-    },
-    [chatId, queryClient]
-  );
-
-  const ensureAssistantMessage = useCallback(
-    (
-      messageId: string,
-      context: StreamingContext,
-      updater: (existing: ChatMessage | undefined) => ChatMessage
-    ) => {
-      const queryKey = queryKeys.chatMessages(chatId);
-
-      queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) => {
-        const next = [...current];
-        const placeholderIndex = next.findIndex(
-          (message) => message.id === context.placeholderId
-        );
-        const targetIndex = next.findIndex(
-          (message) => message.id === messageId
-        );
-
-        if (placeholderIndex !== -1 && targetIndex === -1 && messageId) {
-          context.placeholderId = messageId;
-        }
-
-        const index = targetIndex !== -1 ? targetIndex : placeholderIndex;
-
-        if (index === -1) {
-          next.push(updater(undefined));
-          return next;
-        }
-
-        const existing = next[index];
-        const updated = updater(existing);
-        next[index] = {
-          ...updated,
-          id: messageId || updated.id,
-        };
-        return next;
-      });
-    },
-    [chatId, queryClient]
-  );
-
-  const handleStreamEvent = useCallback(
-    (event: StreamEvent, context: StreamingContext) => {
-      const queryKey = queryKeys.chatMessages(chatId);
-
-      switch (event.type) {
-        case "connected": {
-          const serverUser = normalizeMessage(event.user_message);
-          const assistant = event.assistant_message
-            ? normalizeMessage(event.assistant_message)
-            : null;
-
-          queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) => {
-            const next = [...current];
-
-            const optimisticUserIndex = next.findIndex(
-              (message) => message.id === context.optimisticUserId
-            );
-            if (optimisticUserIndex !== -1) {
-              next[optimisticUserIndex] = serverUser;
-              context.optimisticUserId = serverUser.id;
-            } else if (!next.some((message) => message.id === serverUser.id)) {
-              next.push(serverUser);
-            }
-
-            if (assistant) {
-              const placeholderIndex = next.findIndex(
-                (message) => message.id === context.placeholderId
-              );
-
-              const assistantIndex = next.findIndex(
-                (message) => message.id === assistant.id
-              );
-
-              if (assistantIndex !== -1) {
-                // Preserve thinking status from existing message if no content yet
-                const existing = next[assistantIndex];
-                next[assistantIndex] = {
-                  ...assistant,
-                  status: assistant.content
-                    ? assistant.status
-                    : existing?.status ?? "thinking",
-                };
-                context.placeholderId = assistant.id;
-              } else if (placeholderIndex !== -1) {
-                // Preserve thinking status from placeholder if no content yet
-                const existing = next[placeholderIndex];
-                next[placeholderIndex] = {
-                  ...assistant,
-                  status: assistant.content
-                    ? assistant.status
-                    : existing?.status ?? "thinking",
-                };
-                context.placeholderId = assistant.id;
-              } else {
-                next.push({
-                  ...assistant,
-                  status: assistant.content ? assistant.status : "thinking",
-                });
-                context.placeholderId = assistant.id;
-              }
-            }
-
-            return next;
-          });
-          break;
-        }
-
-        case "content_delta": {
-          ensureAssistantMessage(event.message_id, context, (existing) => ({
-            ...(existing ?? {
-              id: event.message_id,
-              role: "assistant",
-              content: "",
-              created_at: new Date().toISOString(),
-            }),
-            content: event.total_content || event.content,
-            status: event.status ?? existing?.status ?? "processing",
-          }));
-          break;
-        }
-
-        case "completion": {
-          ensureAssistantMessage(event.message_id, context, (existing) => ({
-            ...(existing ?? {
-              id: event.message_id,
-              role: "assistant",
-              content: "",
-              created_at: new Date().toISOString(),
-            }),
-            content: event.content,
-            status: event.status,
-          }));
-
-          if (event.queued_ai === false) {
-            queryClient.invalidateQueries({ queryKey });
-          }
-          break;
-        }
-
-        case "error": {
-          queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) =>
-            current.map((message) =>
-              message.id === context.placeholderId
-                ? {
-                    ...message,
-                    content: ERROR_COPY,
-                    status: "error",
-                  }
-                : message
-            )
-          );
-          break;
-        }
-
-        case "timeout": {
-          queryClient.invalidateQueries({ queryKey });
-          break;
-        }
-
-        default:
-          break;
-      }
-    },
-    [chatId, ensureAssistantMessage, queryClient]
-  );
-
-  const sendMessage = useCallback(
-    async (content: string, options: SendMessageOptions = {}) => {
-      if (!chatId) {
-        return;
-      }
-
-      const trimmed = content.trim();
-      if (!trimmed || streamInFlightRef.current) {
-        return;
-      }
-
-      streamInFlightRef.current = true;
-      setIsStreaming(true);
-
-      if (!options.suppressInputReset) {
-        setInputValue("");
-      }
-
-      const reuseExisting = options.reuseExisting ?? false;
-      const context = ensureOptimisticMessages(
-        trimmed,
-        options.attachments,
-        reuseExisting
-      );
-
-      if (!reuseExisting) {
-        updateChatSummary(true);
-      }
-
-      const queryKey = queryKeys.chatMessages(chatId);
-      const controller = new AbortController();
-      streamAbortRef.current = controller;
-
-      try {
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/v1/chats/${chatId}/messages`,
-          {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              Accept: "text/event-stream",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              content: trimmed,
-              attachments: options.attachments,
-              model: selectedModel,
-            }),
-            signal: controller.signal,
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error("No response body");
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-
-          let boundary = buffer.indexOf("\n\n");
-          while (boundary !== -1) {
-            const rawEvent = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-
-            const dataLine = rawEvent
-              .split("\n")
-              .find((entry) => entry.startsWith("data:"));
-
-            if (dataLine) {
-              const payload = dataLine.replace(/^data:\s*/, "");
-              try {
-                const parsed = parseStreamEvent(JSON.parse(payload));
-                if (parsed) {
-                  handleStreamEvent(parsed, context);
-                }
-              } catch (error) {
-                console.error("Stream parse error", error);
-              }
-            }
-
-            boundary = buffer.indexOf("\n\n");
-          }
-        }
-
-        queryClient.invalidateQueries({ queryKey });
-      } catch (error) {
-        console.error("Streaming error", error);
-        queryClient.setQueryData<ChatMessage[]>(queryKey, (current = []) =>
-          current.map((message) =>
-            message.id === context.placeholderId
-              ? {
-                  ...message,
-                  content: ERROR_COPY,
-                  status: "error",
-                }
-              : message
-          )
-        );
-      } finally {
-        controller.abort();
-        streamAbortRef.current = null;
-        streamInFlightRef.current = false;
-        setIsStreaming(false);
-      }
-    },
-    [
-      chatId,
-      ensureOptimisticMessages,
-      handleStreamEvent,
-      queryClient,
-      selectedModel,
-      updateChatSummary,
-    ]
-  );
-
-  useEffect(() => {
-    if (initialMessage && !initialStreamTriggeredRef.current) {
-      initialStreamTriggeredRef.current = true;
-      void sendMessage(initialMessage, {
-        reuseExisting: true,
-        suppressInputReset: true,
-      });
-      router.replace(`/chat/${chatId}`);
-    }
-  }, [chatId, initialMessage, router, sendMessage]);
-
-  useEffect(
-    () => () => {
-      streamAbortRef.current?.abort();
-    },
-    []
-  );
-
-  const handleSubmit = useCallback(async () => {
-    await sendMessage(inputValue);
-  }, [inputValue, sendMessage]);
-
-  const handleKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        void handleSubmit();
-      }
-    },
-    [handleSubmit]
-  );
+  const {
+    chatTitle,
+    orderedMessages,
+    isLoading,
+    isStreaming,
+    handleFormSubmit,
+  } = useChatStream();
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <header className="border-border bg-card border-b p-4">
-        <h1 className="text-lg font-semibold text-foreground">
-          Chat {chatId.slice(0, 8)}...
-        </h1>
+      {/* Header */}
+      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <Bot className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-sm font-medium text-foreground line-clamp-1">
+              {chatTitle}
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              {isStreaming ? "AI is typing..." : "Chat assistant"}
+            </p>
+          </div>
+        </div>
       </header>
 
-      <section className="flex-1 space-y-4 overflow-y-auto px-4 py-6">
-        {isLoading && orderedMessages.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-            <TextShimmer>Loading messages...</TextShimmer>
-          </div>
-        ) : (
-          orderedMessages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))
-        )}
-        <div ref={messagesEndRef} />
-      </section>
+      {/* Chat Messages */}
+      <Conversation className="flex-1 px-4">
+        <ConversationContent className="max-w-4xl mx-auto space-y-4">
+          {isLoading && orderedMessages.length === 0 ? (
+            <ConversationEmptyState
+              icon={<Bot className="w-12 h-12" />}
+              title="Loading conversation..."
+              description="Please wait while we fetch your messages"
+            />
+          ) : orderedMessages.length === 0 ? (
+            <ConversationEmptyState
+              icon={<Bot className="w-12 h-12" />}
+              title="Start the conversation"
+              description="Send a message to begin chatting with AI"
+            />
+          ) : (
+            orderedMessages.map((msg) => (
+              <Message key={msg.id} from={msg.role as "user" | "assistant"}>
+                <MessageAvatar
+                  src={msg.role === "user" ? "" : ""}
+                  name={msg.role === "user" ? "You" : "AI"}
+                />
+                <MessageContent variant="flat">
+                  {msg.role === "user" ? (
+                    <div className="whitespace-pre-wrap text-sm">
+                      {msg.content}
+                    </div>
+                  ) : (
+                    <div className="text-sm">
+                      {msg.status === "thinking" && msg.content === "..." ? (
+                        <div className="flex items-center space-x-2 py-2">
+                          <Loader size={16} />
+                          <span className="text-muted-foreground">Thinking...</span>
+                        </div>
+                      ) : msg.status === "processing" && !msg.content ? (
+                        <div className="flex items-center space-x-2 py-2">
+                          <Loader size={16} />
+                          <span className="text-muted-foreground">Processing...</span>
+                        </div>
+                      ) : (
+                        <Response>{msg.content}</Response>
+                      )}
+                    </div>
+                  )}
+                </MessageContent>
+              </Message>
+            ))
+          )}
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
-      <footer className="border-border bg-card border-t p-4">
-        <div className="flex items-end gap-2">
-          <textarea
-            value={inputValue}
-            onChange={(event) => setInputValue(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isStreaming ? "AI is responding..." : "Type a message..."
-            }
-            className="border-input text-foreground focus:ring-ring flex-1 resize-none rounded-lg border bg-background p-3 focus:outline-none focus:ring-2"
-            rows={2}
-            disabled={isStreaming}
-          />
-          <button
-            type="button"
-            onClick={() => void handleSubmit()}
-            disabled={isStreaming || !inputValue.trim()}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground rounded-lg px-4 py-2 transition-colors"
-          >
-            {isStreaming ? "..." : "Send"}
-          </button>
+      {/* Input Area */}
+      <footer className="sticky bottom-0 bg-background/80 backdrop-blur-sm border-t border-border p-4">
+        <div className="max-w-4xl mx-auto">
+          <form onSubmit={handleFormSubmit}>
+            <PromptBox
+              name="message"
+              disabled={isStreaming}
+              placeholder={
+                isStreaming 
+                  ? "AI is responding..." 
+                  : `Message ${chatTitle}...`
+              }
+            />
+          </form>
         </div>
       </footer>
     </div>

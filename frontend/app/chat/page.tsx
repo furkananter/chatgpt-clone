@@ -1,23 +1,59 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import { Brain, MessageSquare, Sparkles } from "lucide-react";
 
 import { useInstantChat } from "@/hooks/use-instant-chat";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { PromptBox } from "@/components/ui/chatgpt-prompt-input";
+
+const suggestions = [
+  {
+    icon: Brain,
+    title: "Explain a concept",
+    description: "Break down complex topics in simple terms"
+  },
+  {
+    icon: MessageSquare,
+    title: "Have a conversation",
+    description: "Chat about anything that interests you"
+  },
+  {
+    icon: Sparkles,
+    title: "Get creative help",
+    description: "Generate ideas, stories, or solutions"
+  }
+];
 
 export default function ChatHomePage() {
   const { createInstantChat } = useInstantChat();
   const selectedModel = useChatStore((state) => state.selectedModel);
-  const [message, setMessage] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
-  const createChat = () => {
-    if (!message.trim() || isCreating) return;
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (isCreating) return;
+
+    const formData = new FormData(e.currentTarget);
+    const message = (formData.get("message") as string)?.trim();
+    
+    if (!message) return;
 
     setIsCreating(true);
     try {
-      createInstantChat(message.trim(), selectedModel);
-      setMessage("");
+      createInstantChat(message, selectedModel);
+    } catch (error) {
+      console.error("Failed to create chat", error);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleSuggestionClick = (suggestion: string) => {
+    if (isCreating) return;
+    setIsCreating(true);
+    try {
+      createInstantChat(suggestion, selectedModel);
     } catch (error) {
       console.error("Failed to create chat", error);
     } finally {
@@ -26,27 +62,58 @@ export default function ChatHomePage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="max-w-md w-full p-6 bg-card rounded-lg shadow">
-        <h1 className="text-2xl font-bold mb-6 text-center">Start New Chat</h1>
+    <div className="flex min-h-screen flex-col bg-background">
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="w-full max-w-4xl space-y-8">
+          {/* Header */}
+          <div className="text-center space-y-2">
+            <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mb-4">
+              <MessageSquare className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-3xl font-semibold text-foreground">
+              How can I help you today?
+            </h1>
+            <p className="text-muted-foreground">
+              Choose a suggestion below or ask me anything
+            </p>
+          </div>
 
-        <div className="space-y-4">
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Type your message..."
-            className="w-full p-3 border border-input bg-background text-foreground rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-            rows={4}
-            disabled={isCreating}
-          />
+          {/* Suggestions */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            {suggestions.map((suggestion, index) => (
+              <button
+                key={index}
+                onClick={() => handleSuggestionClick(suggestion.description)}
+                disabled={isCreating}
+                className="group p-4 rounded-xl border border-border bg-card hover:bg-accent hover:border-accent-foreground/20 transition-all duration-200 text-left disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <div className="flex items-start space-x-3">
+                  <div className="p-2 rounded-lg bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                    <suggestion.icon className="w-5 h-5 text-primary" />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <h3 className="font-medium text-sm text-foreground group-hover:text-accent-foreground">
+                      {suggestion.title}
+                    </h3>
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {suggestion.description}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
 
-          <button
-            onClick={createChat}
-            disabled={!message.trim() || isCreating}
-            className="w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 disabled:bg-gray-300"
-          >
-            {isCreating ? "Creating..." : "Start Chat"}
-          </button>
+          {/* Chat Input */}
+          <div className="max-w-2xl mx-auto">
+            <form onSubmit={handleSubmit}>
+              <PromptBox 
+                name="message"
+                disabled={isCreating}
+                placeholder={isCreating ? "Creating chat..." : "Message..."}
+              />
+            </form>
+          </div>
         </div>
       </div>
     </div>
