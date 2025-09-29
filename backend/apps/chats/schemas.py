@@ -43,7 +43,6 @@ class MessageResponse(ModelSchema):
             "user_rating",
             "is_regenerated",
             "regeneration_count",
-            "vector_id",
             "mem0_reference",
             "created_at",
             "updated_at",

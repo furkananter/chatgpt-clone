@@ -76,7 +76,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     monthly_message_limit = models.PositiveIntegerField(default=50)
 
     preferred_language = models.CharField(max_length=10, default="en")
-    preferred_model = models.CharField(max_length=50, default="gpt-3.5-turbo")
+    preferred_model = models.CharField(max_length=50, default="gpt-4o-mini")
     theme_preference = models.CharField(
         max_length=10,
         choices=THEME_CHOICES,

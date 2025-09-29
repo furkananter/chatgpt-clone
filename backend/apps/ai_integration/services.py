@@ -25,22 +25,13 @@ class OpenRouterAPIError(Exception):
 
 class OpenRouterService:
     BASE_URL = "https://openrouter.ai/api/v1"
-    DEFAULT_MODEL = "openai/gpt-4o-mini"
-    _MODEL_ALIASES = {
-        "gpt-4-1 mini": "openai/gpt-4.1-mini",
-        "gpt-4-1": "openai/gpt-4.1",
-        "gpt-4o mini": "openai/gpt-4o-mini",
-        "gpt-4o-mini": "openai/gpt-4o-mini",
-        "o3-mini": "openai/o3-mini",
-        "claude 3.5 sonnet": "anthropic/claude-3.5-sonnet",
-        "gemini 2.5 flash": "google/gemini-1.5-flash",
-    }
+    DEFAULT_MODEL = "google/gemini-2.5-flash"
 
     @classmethod
     def get_headers(cls) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-            "HTTP-Referer": settings.SITE_URL,
+            "HTTP-Referrer": settings.SITE_URL,
             "X-Title": "ChatGPT Clone",
             "Content-Type": "application/json",
         }
@@ -112,10 +103,6 @@ class OpenRouterService:
         if "/" in candidate:
             return candidate
 
-        alias = cls._MODEL_ALIASES.get(candidate.lower())
-        if alias:
-            return alias
-
         try:
             record = AIModel.objects.get(
                 Q(name__iexact=candidate)
@@ -135,7 +122,9 @@ class OpenRouterService:
     async def get_available_models(cls) -> List[Dict[str, Any]]:
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
-                response = await client.get(f"{cls.BASE_URL}/models", headers=cls.get_headers())
+                response = await client.get(
+                    f"{cls.BASE_URL}/models", headers=cls.get_headers()
+                )
                 response.raise_for_status()
                 data = response.json()
                 return data.get("data", [])
@@ -144,11 +133,17 @@ class OpenRouterService:
             return []
 
     @classmethod
-    async def estimate_cost(cls, *, model: str, input_tokens: int, output_tokens: int = 0) -> float:
+    async def estimate_cost(
+        cls, *, model: str, input_tokens: int, output_tokens: int = 0
+    ) -> float:
         try:
             ai_model = await AIModel.objects.aget(openrouter_model_id=model)
-            input_cost = (input_tokens / 1_000_000) * float(ai_model.input_price_per_million)
-            output_cost = (output_tokens / 1_000_000) * float(ai_model.output_price_per_million)
+            input_cost = (input_tokens / 1_000_000) * float(
+                ai_model.input_price_per_million
+            )
+            output_cost = (output_tokens / 1_000_000) * float(
+                ai_model.output_price_per_million
+            )
             return input_cost + output_cost
         except AIModel.DoesNotExist:
             logger.warning("Model %s not found in database", model)
@@ -164,23 +159,23 @@ class Mem0Service:
         if Memory is None:
             self.memory = None
         else:
-            config = {
-                "vector_store": {
-                    "provider": "qdrant",
-                    "config": {
-                        "url": settings.QDRANT_HOST,
-                        "api_key": settings.QDRANT_API_KEY,
+            # Use OpenAI with gpt-4o-mini for Mem0
+            try:
+                config = {
+                    "llm": {
+                        "provider": "openai",
+                        "config": {
+                            "model": "gpt-4o-mini",
+                            "api_key": settings.OPENAI_API_KEY,
+                        },
                     },
-                },
-                "llm": {
-                    "provider": "openai",
-                    "config": {
-                        "model": "gpt-3.5-turbo",
-                        "api_key": settings.OPENAI_API_KEY,
-                    },
-                },
-            }
-            self.memory = Memory.from_config(config)
+                    "version": "v1.1",
+                }
+                self.memory = Memory.from_config(config)
+                logger.info("Mem0 initialized successfully with OpenAI gpt-4o-mini")
+            except Exception as e:
+                logger.warning("Failed to initialize Mem0, disabling memory: %s", e)
+                self.memory = None
 
     async def _run_async(self, func, *args, **kwargs):
         if self.memory is None:
@@ -193,11 +188,7 @@ class Mem0Service:
         if self.memory is None:
             return memory_id
         try:
-            await self._run_async(
-                self.memory.add,
-                messages=[{"role": "system", "content": "New conversation started"}],
-                user_id=memory_id,
-            )
+            # Skip initial memory creation - just create the record
             await ConversationMemory.objects.aupdate_or_create(
                 chat_id=chat_id,
                 defaults={"mem0_memory_id": memory_id},
@@ -207,13 +198,30 @@ class Mem0Service:
             logger.error("Failed to create memory context: %s", exc)
             raise MemoryServiceError(str(exc)) from exc
 
-    async def add_conversation_memory(self, memory_id: str, messages: List[Message], user_id: str):
+    async def add_conversation_memory(
+        self, memory_id: str, messages: List[Message], user_id: str
+    ):
         if self.memory is None:
             return
-        payload = [{"role": msg.role, "content": msg.content} for msg in messages]
+        # Only process last few messages to reduce vector operations
+        recent_messages = messages[-3:] if len(messages) > 3 else messages
+        payload = [
+            {"role": msg.role, "content": msg.content} for msg in recent_messages
+        ]
+
+        # Skip if no meaningful content
+        if not any(msg.content.strip() for msg in recent_messages):
+            return
+
+        # Skip very short messages to reduce noise
+        if all(len(msg.content.strip()) < 10 for msg in recent_messages):
+            return
+
         await self._run_async(self.memory.add, messages=payload, user_id=memory_id)
 
-    async def get_relevant_memories(self, memory_id: str, query: str, limit: int = 5) -> str:
+    async def get_relevant_memories(
+        self, memory_id: str, query: str, limit: int = 5
+    ) -> str:
         if self.memory is None:
             return ""
         try:
@@ -231,11 +239,7 @@ class Mem0Service:
         for item in memories or []:
             text: Optional[str] = None
             if isinstance(item, dict):
-                text = (
-                    item.get("text")
-                    or item.get("content")
-                    or item.get("value")
-                )
+                text = item.get("text") or item.get("content") or item.get("value")
                 if not text and isinstance(item.get("payload"), dict):
                     payload = item["payload"]
                     text = payload.get("text") or payload.get("content")

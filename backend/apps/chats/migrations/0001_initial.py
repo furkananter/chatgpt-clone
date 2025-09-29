@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
                 ("is_title_generated", models.BooleanField(default=False)),
                 (
                     "model_used",
-                    models.CharField(default="gpt-3.5-turbo", max_length=100),
+                    models.CharField(default="gpt-4o-mini", max_length=100),
                 ),
                 ("system_prompt", models.TextField(blank=True)),
                 ("temperature", models.FloatField(default=0.7)),

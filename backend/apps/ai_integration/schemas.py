@@ -54,4 +54,3 @@ class CostEstimateResponse(Schema):
     input_tokens: int
     output_tokens: int
     calculated_at: datetime
-

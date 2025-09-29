@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { PanelLeft, Plus, UsersRound, LogOut } from "lucide-react";
+import { PanelLeft, Plus, UsersRound } from "lucide-react";
 import { SidebarSection } from "./sidebar-section";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
@@ -10,10 +10,12 @@ import { SidebarHeader } from "./sidebar-header";
 import { OpenAILogo } from "@/components/icons";
 import { useChats } from "@/hooks/use-chats";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { Skeleton } from "@/components/ui/skeleton";
+import { SettingsPopover } from "@/components/settings-popover";
 
 export function Sidebar() {
   const { user, isAuthenticated, isLoading, logout } = useAuthStore();
-  const { chats } = useChats();
+  const { chats, isLoading: chatsLoading } = useChats();
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isDesktop, setIsDesktop] = useState(true);
@@ -47,8 +49,13 @@ export function Sidebar() {
   const toggleSidebar = () => setIsSidebarOpen((v) => !v);
 
   const handleLogout = () => {
-    logout();
-    router.push("/");
+    try {
+      logout();
+    } catch (e) {
+      console.error("Error logging out:", e);
+    } finally {
+      router.push("/");
+    }
   };
 
   return (
@@ -76,7 +83,7 @@ export function Sidebar() {
         )}
       >
         {/* Top Section */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden overflow-x-visible">
           <div className="py-3">
             <div
               className={cn(
@@ -111,42 +118,61 @@ export function Sidebar() {
 
           {/* Scrollable chat list */}
           {isSidebarOpen && (
-            <div className="flex-1 space-y-6 px-3 overflow-y-auto">
-              <SidebarSection title="Chats" chats={chats} />
+            <div className="flex-1 space-y-6 px-3 overflow-y-auto overflow-x-visible">
+              {chatsLoading ? (
+                <div className="space-y-2">
+                  <br />
+                  <div className="px-3 text-xs uppercase font-semibold tracking-wide text-secondary-foreground">
+                    CHATS
+                  </div>
+                  <div className="space-y-2">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="p-3 space-y-2">
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-3 w-3/4" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <SidebarSection title="Chats" chats={chats} />
+              )}
             </div>
           )}
         </div>
         <br />
 
         {/* Footer always at bottom */}
-        <div className={cn("px-2 pb-1 border-t", !isSidebarOpen && "px-0")}>
+        <div
+          className={cn(
+            "px-2 pb-1 border-t relative overflow-visible",
+            !isSidebarOpen && "px-0"
+          )}
+        >
           {isSidebarOpen ? (
             <div className="flex items-center gap-3 p-3">
-              {isAuthenticated && user ? (
+              {isLoading ? (
                 <div className="flex items-center justify-between w-full">
                   <div className="flex gap-3">
-                    <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-medium">
-                      {user.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex flex-col overflow-hidden">
-                      <span className="text-sm text-foreground truncate">
-                        {user.name}
-                      </span>
-                      <span className="text-xs text-muted-foreground truncate">
-                        {user.plan}
-                      </span>
+                    <Skeleton className="w-8 h-8 rounded-full" />
+                    <div className="flex flex-col space-y-1">
+                      <Skeleton className="h-4 w-20" />
+                      <Skeleton className="h-3 w-16" />
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted"
-                    onClick={handleLogout}
-                    title="Logout"
-                  >
-                    <LogOut className="h-4 w-4" />
-                  </Button>
+                  <Skeleton className="h-8 w-8 rounded-md" />
                 </div>
+              ) : isAuthenticated && user ? (
+                <SettingsPopover
+                  onLogout={handleLogout}
+                  collapsed={false}
+                  user={{
+                    name: user.name,
+                    email: user.email,
+                    plan: user.plan,
+                    avatar_url: user.avatar_url,
+                  }}
+                />
               ) : (
                 <Button
                   variant="ghost"
@@ -161,21 +187,22 @@ export function Sidebar() {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center gap-2">
-              {isAuthenticated && user ? (
+              {isLoading ? (
                 <>
-                  <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-medium">
-                    {user.name.charAt(0).toUpperCase()}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted"
-                    onClick={handleLogout}
-                    title="Logout"
-                  >
-                    <LogOut className="h-4 w-4" />
-                  </Button>
+                  <Skeleton className="w-8 h-8 rounded-full" />
+                  <Skeleton className="h-8 w-8 rounded-md" />
                 </>
+              ) : isAuthenticated && user ? (
+                <SettingsPopover
+                  onLogout={handleLogout}
+                  collapsed={true}
+                  user={{
+                    name: user.name,
+                    email: user.email,
+                    plan: user.plan,
+                    avatar_url: user.avatar_url,
+                  }}
+                />
               ) : (
                 <Button
                   variant="ghost"

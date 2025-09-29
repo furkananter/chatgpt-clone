@@ -40,7 +40,7 @@ const MicIcon = (props: React.SVGProps<SVGSVGElement>) => ( <svg width="24" heig
 const toolsList = [ { id: 'createImage', name: 'Create an image', shortName: 'Image', icon: PaintBrushIcon }, { id: 'searchWeb', name: 'Search the web', shortName: 'Search', icon: GlobeIcon }, { id: 'writeCode', name: 'Write or code', shortName: 'Write', icon: PencilIcon }, { id: 'deepResearch', name: 'Run deep research', shortName: 'Deep Search', icon: TelescopeIcon, extra: '5 left' }, { id: 'thinkLonger', name: 'Think for longer', shortName: 'Think', icon: LightbulbIcon }, ];
 
 // --- The Final, Self-Contained PromptBox Component ---
-export const PromptBox = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
+export const PromptBox = React.forwardRef<HTMLTextAreaElement & { reset: () => void }, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   ({ className, ...props }, ref) => {
     // ... all state and handlers are unchanged ...
     const internalTextareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -50,7 +50,28 @@ export const PromptBox = React.forwardRef<HTMLTextAreaElement, React.TextareaHTM
     const [selectedTool, setSelectedTool] = React.useState<string | null>(null);
     const [isPopoverOpen, setIsPopoverOpen] = React.useState(false);
     const [isImageDialogOpen, setIsImageDialogOpen] = React.useState(false);
-    React.useImperativeHandle(ref, () => internalTextareaRef.current!, []);
+
+    const resetForm = React.useCallback(() => {
+      setValue("");
+      setImagePreview(null);
+      setSelectedTool(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      if (internalTextareaRef.current) {
+        internalTextareaRef.current.value = "";
+        internalTextareaRef.current.style.height = "auto";
+      }
+    }, []);
+
+    React.useImperativeHandle(ref, () => {
+      const textarea = internalTextareaRef.current;
+      if (!textarea) return null as any;
+
+      return Object.assign(textarea, {
+        reset: resetForm,
+      });
+    }, [resetForm]);
     React.useLayoutEffect(() => { const textarea = internalTextareaRef.current; if (textarea) { textarea.style.height = "auto"; const newHeight = Math.min(textarea.scrollHeight, 200); textarea.style.height = `${newHeight}px`; } }, [value]);
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => { setValue(e.target.value); if (props.onChange) props.onChange(e); };
     const handlePlusClick = () => { fileInputRef.current?.click(); };

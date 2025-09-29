@@ -73,7 +73,6 @@ async def serialize_message(message: Message) -> MessageResponse:
         user_rating=message.user_rating,
         is_regenerated=message.is_regenerated,
         regeneration_count=message.regeneration_count,
-        vector_id=message.vector_id,
         mem0_reference=message.mem0_reference,
         created_at=message.created_at,
         updated_at=message.updated_at,

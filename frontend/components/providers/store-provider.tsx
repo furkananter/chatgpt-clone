@@ -9,19 +9,17 @@ import { useUIStore } from "@/lib/stores/ui-store";
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const { theme, setTheme } = useUIStore();
   const { setTheme: setNextTheme, theme: nextTheme } = useTheme();
-  // Sync UI store theme with next-themes
+  // Sync themes bidirectionally
   useEffect(() => {
-    if (theme && theme !== nextTheme) {
+    // Only update if there's actually a difference and both values exist
+    if (theme && nextTheme && theme !== nextTheme) {
+      // Prioritize next-themes as the source of truth
+      setTheme(nextTheme as "light" | "dark" | "system");
+    } else if (theme && !nextTheme) {
+      // Initialize next-themes if it's not set
       setNextTheme(theme);
     }
-  }, [theme, setNextTheme, nextTheme]);
-
-  // Update UI store when next-themes theme changes
-  useEffect(() => {
-    if (nextTheme && nextTheme !== theme) {
-      setTheme(nextTheme as "light" | "dark" | "system");
-    }
-  }, [nextTheme, setTheme, theme]);
+  }, [theme, nextTheme, setTheme, setNextTheme]);
 
   // Listen for system theme changes
   useEffect(() => {

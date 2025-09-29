@@ -20,8 +20,6 @@ env = environ.Env(
     DEBUG=(bool, False),
     DATABASE_URL=(str),
     REDIS_URL=(str, "redis://127.0.0.1:6379/0"),
-    QDRANT_HOST=(str, "localhost"),
-    QDRANT_PORT=(int, 6333),
     SITE_URL=(str, "http://localhost:3000"),
 )
 
@@ -55,7 +53,6 @@ LOCAL_APPS = [
     "apps.users",
     "apps.chats",
     "apps.ai_integration",
-    "apps.vector_store",
     "shared",
 ]
 
@@ -113,6 +110,7 @@ if REDIS_PARSED.scheme == "rediss":
         "ssl_ca_certs": None,
     }
 
+
 def _redis_options(*, include_serializer: bool = False) -> dict:
     options: dict[str, object] = {
         "CLIENT_CLASS": "django_redis.client.DefaultClient",
@@ -122,6 +120,7 @@ def _redis_options(*, include_serializer: bool = False) -> dict:
     if REDIS_SSL_OPTIONS:
         options["CONNECTION_POOL_KWARGS"] = REDIS_SSL_OPTIONS
     return options
+
 
 CACHES = {
     "default": {
@@ -161,8 +160,6 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-
-
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -187,9 +184,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
-QDRANT_API_KEY = env("QDRANT_API_KEY", default="")
-QDRANT_HOST = env("QDRANT_HOST")
-QDRANT_PORT = env("QDRANT_PORT")
+
 
 # Google OAuth Settings
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")

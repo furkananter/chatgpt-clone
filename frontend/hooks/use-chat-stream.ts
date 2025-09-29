@@ -30,7 +30,9 @@ interface SendMessageOptions {
 
 const ERROR_COPY = "Sorry, there was an error. Please try again.";
 
-export const useChatStream = () => {
+export const useChatStream = (
+  promptBoxRef?: React.RefObject<HTMLTextAreaElement & { reset: () => void }>
+) => {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -59,19 +61,17 @@ export const useChatStream = () => {
   const chatTitle = useMemo(() => {
     // Try to get chat title from cache
     const chats = queryClient.getQueryData<ChatSummary[]>(queryKeys.chats());
-    const currentChat = chats?.find(chat => chat.id === chatId);
-    
+    const currentChat = chats?.find((chat) => chat.id === chatId);
+
     if (currentChat?.title && currentChat.title !== "New Chat") {
       return currentChat.title;
     }
 
     // Use first user message as title (truncated)
-    const firstUserMessage = orderedMessages.find(msg => msg.role === "user");
+    const firstUserMessage = orderedMessages.find((msg) => msg.role === "user");
     if (firstUserMessage?.content) {
       const content = firstUserMessage.content.trim();
-      return content.length > 50 
-        ? `${content.substring(0, 50)}...` 
-        : content;
+      return content.length > 50 ? `${content.substring(0, 50)}...` : content;
     }
 
     // Fall back to "New Chat"
@@ -530,11 +530,12 @@ export const useChatStream = () => {
       const message = (formData.get("message") as string)?.trim();
       if (message) {
         await sendMessage(message);
-        // Reset the form
-        e.currentTarget.reset();
+        if (promptBoxRef?.current?.reset) {
+          promptBoxRef.current.reset();
+        }
       }
     },
-    [sendMessage]
+    [sendMessage, promptBoxRef]
   );
 
   return {
@@ -544,17 +545,17 @@ export const useChatStream = () => {
     orderedMessages,
     isLoading,
     isStreaming,
-    
+
     // Input state (deprecated - use form instead)
     inputValue,
     setInputValue,
-    
+
     // Actions
     handleSubmit,
     handleKeyDown,
     handleFormSubmit,
     sendMessage,
-    
+
     // Refs
     messagesEndRef,
   };

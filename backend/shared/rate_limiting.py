@@ -1,10 +1,7 @@
 from functools import wraps
 from inspect import iscoroutinefunction
-
 from django.http import HttpRequest
-
 from shared.exceptions import RateLimitExceededError
-
 from .cache import RateLimiter
 
 

@@ -13,13 +13,8 @@ const protectedRoutes = ["/chat"];
 function hasValidAuthToken(request: NextRequest): boolean {
   const authToken = request.cookies.get(AUTH_COOKIE_NAME)?.value;
 
-  console.log(
-    "Middleware checking auth - cookie value:",
-    authToken ? "Present" : "Missing"
-  );
-
+  // Check if auth token exists
   if (!authToken) {
-    console.log("No auth cookie found");
     return false;
   }
 
@@ -27,7 +22,6 @@ function hasValidAuthToken(request: NextRequest): boolean {
     // Basic JWT structure check (header.payload.signature)
     const parts = authToken.split(".");
     if (parts.length !== 3) {
-      console.log("Invalid JWT structure");
       return false;
     }
 
@@ -36,14 +30,11 @@ function hasValidAuthToken(request: NextRequest): boolean {
     const now = Math.floor(Date.now() / 1000);
 
     if (payload.exp && payload.exp < now) {
-      console.log("Token expired");
       return false;
     }
 
-    console.log("Token appears valid");
     return true;
   } catch (error) {
-    console.log("Error validating token:", error);
     return false;
   }
 }
@@ -51,7 +42,6 @@ function hasValidAuthToken(request: NextRequest): boolean {
 function hasRefreshToken(request: NextRequest): boolean {
   const refreshToken = request.cookies.get(REFRESH_COOKIE_NAME)?.value;
   if (refreshToken) {
-    console.log("Refresh cookie present; allowing downstream refresh attempt");
     return true;
   }
   return false;
@@ -63,9 +53,10 @@ export function middleware(request: NextRequest) {
   const hasRefresh = !hasAuthToken && hasRefreshToken(request);
   const isAuthenticated = hasAuthToken || hasRefresh;
 
-  console.log(
-    `Middleware: ${pathname}, authenticated: ${isAuthenticated}${hasRefresh ? " (via refresh)" : ""}`
-  );
+  // Log authentication status in development only
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`Auth check: ${pathname} - ${isAuthenticated ? 'authenticated' : 'not authenticated'}`);
+  }
 
   // Allow public routes regardless of authentication status
   if (

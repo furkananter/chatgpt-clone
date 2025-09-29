@@ -6,23 +6,24 @@ import { Brain, MessageSquare, Sparkles } from "lucide-react";
 import { useInstantChat } from "@/hooks/use-instant-chat";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { PromptBox } from "@/components/ui/chatgpt-prompt-input";
+import { OpenAILogo } from "@/components/icons";
 
 const suggestions = [
   {
     icon: Brain,
     title: "Explain a concept",
-    description: "Break down complex topics in simple terms"
+    description: "Break down complex topics in simple terms",
   },
   {
     icon: MessageSquare,
     title: "Have a conversation",
-    description: "Chat about anything that interests you"
+    description: "Chat about anything that interests you",
   },
   {
     icon: Sparkles,
     title: "Get creative help",
-    description: "Generate ideas, stories, or solutions"
-  }
+    description: "Generate ideas, stories, or solutions",
+  },
 ];
 
 export default function ChatHomePage() {
@@ -36,7 +37,7 @@ export default function ChatHomePage() {
 
     const formData = new FormData(e.currentTarget);
     const message = (formData.get("message") as string)?.trim();
-    
+
     if (!message) return;
 
     setIsCreating(true);
@@ -67,8 +68,8 @@ export default function ChatHomePage() {
         <div className="w-full max-w-4xl space-y-8">
           {/* Header */}
           <div className="text-center space-y-2">
-            <div className="mx-auto w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mb-4">
-              <MessageSquare className="w-8 h-8 text-white" />
+            <div className="mx-auto w-16 h-16 flex items-center justify-center mb-4">
+              <OpenAILogo className="w-16 h-16" />
             </div>
             <h1 className="text-3xl font-semibold text-foreground">
               How can I help you today?
@@ -107,7 +108,7 @@ export default function ChatHomePage() {
           {/* Chat Input */}
           <div className="max-w-2xl mx-auto">
             <form onSubmit={handleSubmit}>
-              <PromptBox 
+              <PromptBox
                 name="message"
                 disabled={isCreating}
                 placeholder={isCreating ? "Creating chat..." : "Message..."}

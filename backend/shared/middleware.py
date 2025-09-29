@@ -15,7 +15,7 @@ class RateLimitMiddleware(MiddlewareMixin):
     RATE_LIMITS: Dict[str, Dict[str, int]] = {
         r"/api/v1/auth/": {"limit": 10, "window": 300},
         r"/api/v1/chats/": {"limit": 100, "window": 3600},
-        r"/api/v1/chats/.+/messages": {"limit": 50, "window": 3600},
+        r"/api/v1/chats/.+/messages": {"limit": 100, "window": 3600},
     }
 
     def process_request(self, request):

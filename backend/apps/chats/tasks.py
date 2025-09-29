@@ -187,18 +187,12 @@ def _fan_out_post_process(
     total_tokens: int,
 ) -> None:
     from apps.ai_integration.tasks import track_usage, update_memory
-    from apps.vector_store.tasks import create_embeddings
 
     # Execute directly instead of queueing
     try:
         update_memory(str(chat.id), str(assistant_message.id))
     except Exception as e:
         logger.error("Error updating memory: %s", e)
-
-    try:
-        create_embeddings(str(assistant_message.id))
-    except Exception as e:
-        logger.error("Error creating embeddings: %s", e)
 
     try:
         track_usage(str(chat.user_id), model, total_tokens)

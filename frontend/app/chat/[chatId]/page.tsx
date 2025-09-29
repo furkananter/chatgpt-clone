@@ -1,6 +1,7 @@
 "use client";
 
-import { Bot, User } from "lucide-react";
+import { Bot } from "lucide-react";
+import { useRef } from "react";
 
 import {
   Conversation,
@@ -8,29 +9,28 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import {
-  Message,
-  MessageAvatar,
-  MessageContent,
-} from "@/components/ai-elements/message";
+import { Message, MessageContent } from "@/components/ai-elements/message";
 import { Loader } from "@/components/ai-elements/loader";
-import { Response } from "@/components/ai-elements/response";
 import { PromptBox } from "@/components/ui/chatgpt-prompt-input";
 import { useChatStream } from "@/hooks/use-chat-stream";
+import { MemoizedMarkdown } from "@/components/memoized-markdown";
+import { TextShimmer } from "@/components/ui/text-shimmer";
 
 export default function ChatPage() {
+  const promptBoxRef = useRef<HTMLTextAreaElement & { reset: () => void }>(null);
+
   const {
     chatTitle,
     orderedMessages,
     isLoading,
     isStreaming,
     handleFormSubmit,
-  } = useChatStream();
+  } = useChatStream(promptBoxRef);
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
+      <header className="sticky top-0 z-10 bg-background px-4 py-3 shrink-0">
         <div className="flex items-center space-x-3">
           <div className="p-2 rounded-lg bg-primary/10">
             <Bot className="w-5 h-5 text-primary" />
@@ -47,46 +47,41 @@ export default function ChatPage() {
       </header>
 
       {/* Chat Messages */}
-      <Conversation className="flex-1 px-4">
-        <ConversationContent className="max-w-4xl mx-auto space-y-4">
+      <Conversation className="flex-1 min-h-0">
+        <ConversationContent className="max-w-3xl mx-auto space-y-4">
           {isLoading && orderedMessages.length === 0 ? (
             <ConversationEmptyState
-              icon={<Bot className="w-12 h-12" />}
+              icon={<Loader size={30} />}
               title="Loading conversation..."
               description="Please wait while we fetch your messages"
             />
           ) : orderedMessages.length === 0 ? (
             <ConversationEmptyState
-              icon={<Bot className="w-12 h-12" />}
+              icon={<Loader size={30} />}
               title="Start the conversation"
               description="Send a message to begin chatting with AI"
             />
           ) : (
             orderedMessages.map((msg) => (
               <Message key={msg.id} from={msg.role as "user" | "assistant"}>
-                <MessageAvatar
-                  src={msg.role === "user" ? "" : ""}
-                  name={msg.role === "user" ? "You" : "AI"}
-                />
                 <MessageContent variant="flat">
                   {msg.role === "user" ? (
-                    <div className="whitespace-pre-wrap text-sm">
-                      {msg.content}
-                    </div>
+                    <div className="whitespace-pre-wrap">{msg.content}</div>
                   ) : (
-                    <div className="text-sm">
-                      {msg.status === "thinking" && msg.content === "..." ? (
+                    <div>
+                      {msg.status === "thinking" || (msg.status === "processing" && (!msg.content || msg.content === "...")) ? (
                         <div className="flex items-center space-x-2 py-2">
-                          <Loader size={16} />
-                          <span className="text-muted-foreground">Thinking...</span>
-                        </div>
-                      ) : msg.status === "processing" && !msg.content ? (
-                        <div className="flex items-center space-x-2 py-2">
-                          <Loader size={16} />
-                          <span className="text-muted-foreground">Processing...</span>
+                          <TextShimmer>{msg.status === "thinking" ? "Thinking..." : "Processing..."}</TextShimmer>
                         </div>
                       ) : (
-                        <Response>{msg.content}</Response>
+                        <div>
+                          <MemoizedMarkdown id={msg.id} content={msg.content} />
+                          {msg.status === "processing" && (
+                            <div className="flex items-center space-x-2 py-1 mt-2">
+                              <TextShimmer className="text-xs">Still typing...</TextShimmer>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -99,16 +94,15 @@ export default function ChatPage() {
       </Conversation>
 
       {/* Input Area */}
-      <footer className="sticky bottom-0 bg-background/80 backdrop-blur-sm border-t border-border p-4">
-        <div className="max-w-4xl mx-auto">
+      <footer className="sticky bottom-0 p-4 shrink-0">
+        <div className="max-w-3xl mx-auto">
           <form onSubmit={handleFormSubmit}>
             <PromptBox
+              ref={promptBoxRef}
               name="message"
               disabled={isStreaming}
               placeholder={
-                isStreaming 
-                  ? "AI is responding..." 
-                  : `Message ${chatTitle}...`
+                isStreaming ? "AI is responding..." : `Message ${chatTitle}...`
               }
             />
           </form>

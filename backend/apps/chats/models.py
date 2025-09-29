@@ -88,8 +88,6 @@ class Message(models.Model):
     user_rating = models.IntegerField(null=True, blank=True)
     is_regenerated = models.BooleanField(default=False)
     regeneration_count = models.PositiveIntegerField(default=0)
-
-    vector_id = models.CharField(max_length=255, blank=True, null=True)
     mem0_reference = models.CharField(max_length=255, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

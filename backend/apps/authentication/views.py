@@ -151,7 +151,7 @@ async def refresh_token(request, data: TokenRefreshRequest = None):
             refresh_token = data.refresh_token
 
         if not refresh_token:
-            logger.warning("Refresh token missing; cookies=%s", list(request.COOKIES.keys()))
+            logger.warning("Refresh token missing; non-auth cookies available: %s", [key for key in request.COOKIES.keys() if not key.startswith('chatgpt_')])
             raise HttpError(401, "No refresh token provided")
 
         payload = JWTService.decode_refresh_token(refresh_token)
@@ -202,7 +202,7 @@ async def refresh_token(request, data: TokenRefreshRequest = None):
         return response_obj
     except (InvalidTokenError, UserSession.DoesNotExist):
         logger.warning(
-            "Refresh failed for cookies=%s", list(request.COOKIES.keys())
+            "Refresh failed; non-auth cookies available: %s", [key for key in request.COOKIES.keys() if not key.startswith('chatgpt_')]
         )
         raise HttpError(401, "Invalid refresh token")
 
@@ -408,9 +408,8 @@ auth_bearer_instance = AuthBearer()
 @auth_router.get("/me", response=UserProfileResponse, auth=auth_bearer_instance)
 async def get_current_user(request):
     """Get current authenticated user"""
-    logger.warning(f"🎯 /me endpoint reached! Request method: {request.method}")
-    logger.warning(f"🎯 Request cookies in /me: {list(request.COOKIES.keys())}")
-    logger.warning(f"🎯 Raw cookie header in /me: {request.META.get('HTTP_COOKIE', 'NOT_FOUND')}")
+    logger.info(f"/me endpoint accessed - method: {request.method}")
+    logger.debug(f"Available cookies: {[key for key in request.COOKIES.keys() if not key.startswith('chatgpt_')]}")
 
     user = request.auth
     logger.info(f"Authenticated user request: {user.email} (ID: {user.id})")

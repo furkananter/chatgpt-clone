@@ -73,7 +73,7 @@ class Migration(migrations.Migration):
                 ("preferred_language", models.CharField(default="en", max_length=10)),
                 (
                     "preferred_model",
-                    models.CharField(default="gpt-3.5-turbo", max_length=50),
+                    models.CharField(default="gpt-4o-mini", max_length=50),
                 ),
                 (
                     "theme_preference",

@@ -17,17 +17,17 @@ from apps.ai_integration.models import AIModel  # noqa: E402
 def seed_models() -> None:
     defaults = [
         {
-            "name": "gpt-3.5-turbo",
-            "display_name": "GPT-3.5 Turbo",
+            "name": "gpt-4o-mini",
+            "display_name": "GPT-4o Mini",
             "provider": "openai",
-            "openrouter_model_id": "openai/gpt-3.5-turbo",
+            "openrouter_model_id": "openai/gpt-4o-mini",
             "supports_streaming": True,
             "supports_function_calling": True,
-            "supports_vision": False,
-            "max_context_length": 16384,
-            "max_output_tokens": 4096,
-            "input_price_per_million": 1.50,
-            "output_price_per_million": 2.00,
+            "supports_vision": True,
+            "max_context_length": 128000,
+            "max_output_tokens": 16384,
+            "input_price_per_million": 0.15,
+            "output_price_per_million": 0.60,
         },
         {
             "name": "gpt-4",
