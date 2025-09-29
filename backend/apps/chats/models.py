@@ -20,9 +20,6 @@ class Chat(models.Model):
     temperature = models.FloatField(default=0.7)
     max_tokens = models.PositiveIntegerField(default=1000)
 
-    mem0_memory_id = models.CharField(max_length=255, blank=True, null=True)
-    qdrant_collection_id = models.CharField(max_length=255, blank=True, null=True)
-
     is_archived = models.BooleanField(default=False)
     is_pinned = models.BooleanField(default=False)
     is_shared = models.BooleanField(default=False)
@@ -88,7 +85,6 @@ class Message(models.Model):
     user_rating = models.IntegerField(null=True, blank=True)
     is_regenerated = models.BooleanField(default=False)
     regeneration_count = models.PositiveIntegerField(default=0)
-    mem0_reference = models.CharField(max_length=255, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

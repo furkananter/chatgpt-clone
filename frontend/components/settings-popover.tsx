@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useState, useRef, useEffect } from "react";
-import router from "next/router";
+import { useRouter } from "next/navigation";
 
 interface SettingsPopoverProps {
   onLogout: () => void;
@@ -34,6 +34,7 @@ export function SettingsPopover({
   user,
 }: SettingsPopoverProps) {
   const { theme, setTheme } = useTheme();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [imageError, setImageError] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);

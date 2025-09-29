@@ -10,8 +10,6 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 CORS_ALLOW_CREDENTIALS = True
-
-# Disable allowing all origins to enforce the list above
 CORS_ALLOW_ALL_ORIGINS = False
 
 

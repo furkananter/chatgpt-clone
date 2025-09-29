@@ -129,12 +129,25 @@ class ChatPipeline:
             generate_ai_response,
         )  # local import avoids circular dependency
 
+        def _run_with_connection_cleanup():
+            """Wrapper to ensure proper Django DB connection handling in threads."""
+            from django.db import close_old_connections
+
+            # Close any existing connections from parent thread
+            close_old_connections()
+
+            try:
+                generate_ai_response(chat_id, user_message_id, model, assistant_message_id)
+            finally:
+                # Clean up connections when thread finishes
+                close_old_connections()
+
         # Execute in a separate thread to avoid blocking the request
         import threading
 
         thread = threading.Thread(
-            target=generate_ai_response,
-            args=(chat_id, user_message_id, model, assistant_message_id),
+            target=_run_with_connection_cleanup,
+            daemon=True,  # Don't prevent process exit
         )
         thread.start()
         return True
@@ -150,12 +163,25 @@ class ChatPipeline:
             regenerate_ai_response,
         )  # local import avoids circular dependency
 
+        def _run_with_connection_cleanup():
+            """Wrapper to ensure proper Django DB connection handling in threads."""
+            from django.db import close_old_connections
+
+            # Close any existing connections from parent thread
+            close_old_connections()
+
+            try:
+                regenerate_ai_response(message_id, model, assistant_message_id)
+            finally:
+                # Clean up connections when thread finishes
+                close_old_connections()
+
         # Execute in a separate thread to avoid blocking the request
         import threading
 
         thread = threading.Thread(
-            target=regenerate_ai_response,
-            args=(message_id, model, assistant_message_id),
+            target=_run_with_connection_cleanup,
+            daemon=True,  # Don't prevent process exit
         )
         thread.start()
         return True
@@ -167,11 +193,25 @@ class ChatPipeline:
 
         from .tasks import process_message_attachments
 
+        def _run_with_connection_cleanup():
+            """Wrapper to ensure proper Django DB connection handling in threads."""
+            from django.db import close_old_connections
+
+            # Close any existing connections from parent thread
+            close_old_connections()
+
+            try:
+                process_message_attachments(str(message.id))
+            finally:
+                # Clean up connections when thread finishes
+                close_old_connections()
+
         # Execute in a separate thread to avoid blocking the request
         import threading
 
         thread = threading.Thread(
-            target=process_message_attachments, args=(str(message.id),)
+            target=_run_with_connection_cleanup,
+            daemon=True,  # Don't prevent process exit
         )
         thread.start()
         return True

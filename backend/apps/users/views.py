@@ -2,7 +2,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from apps.authentication.models import User
-from apps.authentication.views import AuthBearer
+from apps.authentication.views import auth_bearer_instance
 from .schemas import (
     UserPreferenceSchema,
     UserPreferenceUpdateRequest,
@@ -20,27 +20,56 @@ from .services import (
 users_router = Router(tags=["Users"])
 
 
-@users_router.get("/profile")
+@users_router.get("/profile", response=UserProfileSchema, auth=auth_bearer_instance)
 async def get_profile(request):
-    return {"message": "User profile endpoint - temporarily disabled for setup"}
+    """Get user profile information."""
+    user = request.auth
+    profile = await get_or_create_profile(user)
+    return UserProfileSchema.from_orm(profile)
 
 
-@users_router.put("/profile")
-async def update_profile_view(request):
-    return {"message": "Update profile endpoint - temporarily disabled for setup"}
+@users_router.put("/profile", response=UserProfileSchema, auth=auth_bearer_instance)
+async def update_profile_view(request, data: UserProfileUpdateRequest):
+    """Update user profile information."""
+    user = request.auth
+    profile = await update_profile(user, data.dict(exclude_unset=True))
+    return UserProfileSchema.from_orm(profile)
 
 
-@users_router.get("/preferences")
+@users_router.get("/preferences", response=UserPreferenceSchema, auth=auth_bearer_instance)
 async def get_preferences(request):
-    return {"message": "User preferences endpoint - temporarily disabled for setup"}
+    """Get user preferences."""
+    user = request.auth
+    preferences = await get_or_create_preferences(user)
+    return UserPreferenceSchema.from_orm(preferences)
 
 
-@users_router.put("/preferences")
-async def update_preferences_view(request):
-    return {"message": "Update preferences endpoint - temporarily disabled for setup"}
+@users_router.put("/preferences", response=UserPreferenceSchema, auth=auth_bearer_instance)
+async def update_preferences_view(request, data: UserPreferenceUpdateRequest):
+    """Update user preferences."""
+    user = request.auth
+    preferences = await update_preferences(user, data.dict(exclude_unset=True))
+    return UserPreferenceSchema.from_orm(preferences)
 
 
-@users_router.get("/summary")
+@users_router.get("/summary", response=UserSummarySchema, auth=auth_bearer_instance)
 async def user_summary(request):
-    return {"message": "User summary endpoint - temporarily disabled for setup"}
+    """Get user summary statistics."""
+    user = request.auth
+
+    from apps.chats.models import Chat
+    from asgiref.sync import sync_to_async
+
+    def _get_stats():
+        total_chats = Chat.objects.filter(user=user).count()
+        total_messages = user.monthly_message_count
+        return {
+            "total_chats": total_chats,
+            "total_messages": total_messages,
+            "subscription_tier": user.subscription_tier,
+            "monthly_message_limit": user.monthly_message_limit,
+        }
+
+    stats = await sync_to_async(_get_stats, thread_sensitive=True)()
+    return UserSummarySchema(**stats)
 

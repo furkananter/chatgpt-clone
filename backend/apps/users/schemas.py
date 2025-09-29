@@ -31,6 +31,8 @@ class UserPreferenceUpdateRequest(Schema):
 
 
 class UserSummarySchema(Schema):
-    has_profile: bool
-    has_preferences: bool
+    total_chats: int
+    total_messages: int
+    subscription_tier: str
+    monthly_message_limit: int
 

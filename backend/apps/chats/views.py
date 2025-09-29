@@ -73,7 +73,6 @@ async def serialize_message(message: Message) -> MessageResponse:
         user_rating=message.user_rating,
         is_regenerated=message.is_regenerated,
         regeneration_count=message.regeneration_count,
-        mem0_reference=message.mem0_reference,
         created_at=message.created_at,
         updated_at=message.updated_at,
         completed_at=message.completed_at,
@@ -116,11 +115,13 @@ async def create_chat(request, data: ChatCreateRequest):
             total_tokens_used=chat.total_tokens_used,
             estimated_cost=chat.estimated_cost,
             is_archived=chat.is_archived,
-            mem0_memory_id=chat.mem0_memory_id,
             messages=[]  # Empty for new chat
         )
     except RateLimitExceededError:
         raise HttpError(429, "Rate limit exceeded")
+    except Exception as e:
+        logger.error(f"Error creating chat: {e}")
+        raise HttpError(500, "Failed to create chat")
 
 
 @chat_router.get("/{chat_id}/messages", response=List[MessageResponse], auth=auth_bearer_instance)
@@ -132,21 +133,25 @@ async def get_chat_messages(request, chat_id: str):
         # Chat doesn't exist yet (instant chat flow) - return empty messages
         return []
 
-    queryset = (
-        Message.objects.filter(chat_id=chat_id)
-        .order_by("created_at")
-        .select_related("parent_message")
-        .prefetch_related(Prefetch("attachments"))
-    )
+    try:
+        queryset = (
+            Message.objects.filter(chat_id=chat_id)
+            .order_by("created_at")
+            .select_related("parent_message")
+            .prefetch_related(Prefetch("attachments"))
+        )
 
-    def _fetch_messages() -> list[Message]:
-        return list(queryset)
+        def _fetch_messages() -> list[Message]:
+            return list(queryset)
 
-    messages = await sync_to_async(_fetch_messages, thread_sensitive=True)()
-    serialized: list[MessageResponse] = []
-    for message in messages:
-        serialized.append(await serialize_message(message))
-    return serialized
+        messages = await sync_to_async(_fetch_messages, thread_sensitive=True)()
+        serialized: list[MessageResponse] = []
+        for message in messages:
+            serialized.append(await serialize_message(message))
+        return serialized
+    except Exception as e:
+        logger.error(f"Error fetching messages for chat {chat_id}: {e}")
+        raise HttpError(500, "Failed to fetch messages")
 
 
 @chat_router.post("/{chat_id}/messages", auth=auth_bearer_instance)
@@ -154,94 +159,98 @@ async def get_chat_messages(request, chat_id: str):
 async def send_message(request, chat_id: str, data: MessageCreateRequest):
     user = request.auth
 
-    # Try to get existing chat, create if doesn't exist (instant chat support)
     try:
-        chat = await Chat.objects.select_related("user").aget(id=chat_id, user=user)
-    except Chat.DoesNotExist:
-        # Auto-create chat for instant chat flow
-        from django.utils import timezone
-
-        # Generate title from message content (first 50 chars)
-        title = data.content[:50] + ("..." if len(data.content) > 50 else "")
-
-        preferred_model = (
-            data.model
-            or getattr(user, "preferred_model", None)
-            or "gpt-4o-mini"
-        )
-
-        chat = await Chat.objects.acreate(
-            id=chat_id,  # Use the provided chat_id from frontend
-            user=user,
-            title=title,
-            model_used=preferred_model,
-            created_at=timezone.now(),
-        )
-
-    if not await MessageService.check_user_message_limit(user):
-        raise HttpError(402, "Monthly message limit reached")
-
-    try:
-        outcome = await chat_pipeline.send_user_message(
-            chat=chat,
-            content=data.content,
-            model=data.model,
-            attachments=data.attachments,
-        )
-    except RateLimitExceededError:
-        raise HttpError(429, "Rate limit exceeded")
-
-    user_payload = await serialize_message(outcome.message)
-
-    def _schema_to_dict(schema_obj):
-        if hasattr(schema_obj, "model_dump"):
-            return schema_obj.model_dump()
-        if hasattr(schema_obj, "dict"):
-            return schema_obj.dict()
-        if hasattr(schema_obj, "model_dump_json"):
-            return json.loads(schema_obj.model_dump_json())
-        return json.loads(schema_obj.json())
-
-    user_payload_data = _schema_to_dict(user_payload)
-
-    # Check if client wants streaming response
-    accept_header = request.headers.get("Accept", "")
-    if "text/event-stream" in accept_header:
-        logger.info(
-            "🎯 STREAMING REQUEST for chat %s user_message=%s assistant=%s",
-            chat_id,
-            outcome.message.id,
-            getattr(outcome.assistant_message, "id", None),
-        )
+        # Try to get existing chat, create if doesn't exist (instant chat support)
         try:
-            assistant_payload_data = None
-            if outcome.assistant_message is not None:
-                assistant_payload = await serialize_message(outcome.assistant_message)
-                assistant_payload_data = _schema_to_dict(assistant_payload)
+            chat = await Chat.objects.select_related("user").aget(id=chat_id, user=user)
+        except Chat.DoesNotExist:
+            # Auto-create chat for instant chat flow
+            from django.utils import timezone
 
-            return stream_ai_response(
-                assistant_message_id=str(outcome.assistant_message.id)
-                if outcome.assistant_message
-                else None,
-                user_message_payload=user_payload_data,
-                assistant_message_payload=assistant_payload_data,
-                queued_ai=outcome.queued_ai,
+            # Generate title from message content (first 50 chars)
+            title = data.content[:50] + ("..." if len(data.content) > 50 else "")
+
+            preferred_model = (
+                data.model
+                or getattr(user, "preferred_model", None)
+                or "gpt-4o-mini"
             )
-        except Exception as e:
-            logger.error(f"❌ STREAMING ERROR: {e}")
-            # Fallback to normal response
-            from django.http import JsonResponse
-            response = JsonResponse(user_payload_data)
-            response["Access-Control-Allow-Origin"] = "http://localhost:3000"
-            response["Access-Control-Allow-Credentials"] = "true"
-            return response
 
-    # Add CORS headers for normal JSON response too
-    from django.http import JsonResponse
-    response = JsonResponse(user_payload_data)
-    response["Access-Control-Allow-Origin"] = "http://localhost:3000"
-    response["Access-Control-Allow-Credentials"] = "true"
-    return response
+            chat = await Chat.objects.acreate(
+                id=chat_id,  # Use the provided chat_id from frontend
+                user=user,
+                title=title,
+                model_used=preferred_model,
+                created_at=timezone.now(),
+            )
+
+        if not await MessageService.check_user_message_limit(user):
+            raise HttpError(402, "Monthly message limit reached")
+
+        try:
+            outcome = await chat_pipeline.send_user_message(
+                chat=chat,
+                content=data.content,
+                model=data.model,
+                attachments=data.attachments,
+            )
+        except RateLimitExceededError:
+            raise HttpError(429, "Rate limit exceeded")
+
+        user_payload = await serialize_message(outcome.message)
+
+        def _schema_to_dict(schema_obj):
+            if hasattr(schema_obj, "model_dump"):
+                return schema_obj.model_dump()
+            if hasattr(schema_obj, "dict"):
+                return schema_obj.dict()
+            if hasattr(schema_obj, "model_dump_json"):
+                return json.loads(schema_obj.model_dump_json())
+            return json.loads(schema_obj.json())
+
+        user_payload_data = _schema_to_dict(user_payload)
+
+        # Check if client wants streaming response
+        accept_header = request.headers.get("Accept", "")
+        if "text/event-stream" in accept_header:
+            logger.info(
+                "🎯 STREAMING REQUEST for chat %s user_message=%s assistant=%s",
+                chat_id,
+                outcome.message.id,
+                getattr(outcome.assistant_message, "id", None),
+            )
+            try:
+                assistant_payload_data = None
+                if outcome.assistant_message is not None:
+                    assistant_payload = await serialize_message(outcome.assistant_message)
+                    assistant_payload_data = _schema_to_dict(assistant_payload)
+
+                return stream_ai_response(
+                    assistant_message_id=str(outcome.assistant_message.id)
+                    if outcome.assistant_message
+                    else None,
+                    user_message_payload=user_payload_data,
+                    assistant_message_payload=assistant_payload_data,
+                    queued_ai=outcome.queued_ai,
+                )
+            except Exception as e:
+                logger.error(f"❌ STREAMING ERROR: {e}")
+                # Fallback to normal response
+                from django.http import JsonResponse
+                response = JsonResponse(user_payload_data)
+                response["Access-Control-Allow-Origin"] = "http://localhost:3000"
+                response["Access-Control-Allow-Credentials"] = "true"
+                return response
+
+        # Add CORS headers for normal JSON response too
+        from django.http import JsonResponse
+        response = JsonResponse(user_payload_data)
+        response["Access-Control-Allow-Origin"] = "http://localhost:3000"
+        response["Access-Control-Allow-Credentials"] = "true"
+        return response
+    except Exception as e:
+        logger.error(f"Error sending message to chat {chat_id}: {e}")
+        raise HttpError(500, "Failed to send message")
 
 
 def stream_ai_response(
@@ -260,13 +269,18 @@ def stream_ai_response(
         max_wait_time = 45.0  # seconds
         start_time = time.monotonic()
 
-        initial_payload = {
-            "type": "connected",
-            "user_message": user_message_payload,
-            "assistant_message": assistant_message_payload,
-            "queued_ai": queued_ai,
-        }
-        yield f"data: {json.dumps(initial_payload, default=str)}\n\n"
+        try:
+            initial_payload = {
+                "type": "connected",
+                "user_message": user_message_payload,
+                "assistant_message": assistant_message_payload,
+                "queued_ai": queued_ai,
+            }
+            yield f"data: {json.dumps(initial_payload, default=str)}\n\n"
+        except GeneratorExit:
+            # Client disconnected - this is normal, don't log as error
+            logger.debug("Client disconnected from stream during initial payload")
+            return
 
         if not assistant_message_id:
             yield f"data: {json.dumps({'type': 'error', 'error': 'assistant-message-missing'})}\n\n"
@@ -298,49 +312,54 @@ def stream_ai_response(
             yield f"data: {json.dumps(completion, default=str)}\n\n"
             return
 
-        while (time.monotonic() - start_time) < max_wait_time:
-            try:
-                message = Message.objects.select_related("chat").get(
-                    id=assistant_message_id
-                )
-            except Message.DoesNotExist:
+        try:
+            while (time.monotonic() - start_time) < max_wait_time:
+                try:
+                    message = Message.objects.select_related("chat").get(
+                        id=assistant_message_id
+                    )
+                except Message.DoesNotExist:
+                    time.sleep(check_interval)
+                    continue
+
+                current_content = message.content or ""
+                if len(current_content) > len(last_content):
+                    delta = current_content[len(last_content) :]
+                    payload = {
+                        "type": "content_delta",
+                        "content": delta,
+                        "total_content": current_content,
+                        "status": message.status,
+                        "message_id": str(message.id),
+                    }
+                    yield f"data: {json.dumps(payload, default=str)}\n\n"
+                    last_content = current_content
+
+                if message.status in {"completed", "failed"}:
+                    completion = {
+                        "type": "completion",
+                        "content": current_content,
+                        "status": message.status,
+                        "message_id": str(message.id),
+                        "error_message": message.error_message,
+                    }
+                    yield f"data: {json.dumps(completion, default=str)}\n\n"
+                    break
+
+                last_status = message.status
                 time.sleep(check_interval)
-                continue
 
-            current_content = message.content or ""
-            if len(current_content) > len(last_content):
-                delta = current_content[len(last_content) :]
-                payload = {
-                    "type": "content_delta",
-                    "content": delta,
-                    "total_content": current_content,
-                    "status": message.status,
-                    "message_id": str(message.id),
+            else:
+                timeout_payload = {
+                    "type": "timeout",
+                    "message_id": assistant_message_id,
+                    "last_status": last_status,
                 }
-                yield f"data: {json.dumps(payload, default=str)}\n\n"
-                last_content = current_content
-
-            if message.status in {"completed", "failed"}:
-                completion = {
-                    "type": "completion",
-                    "content": current_content,
-                    "status": message.status,
-                    "message_id": str(message.id),
-                    "error_message": message.error_message,
-                }
-                yield f"data: {json.dumps(completion, default=str)}\n\n"
-                break
-
-            last_status = message.status
-            time.sleep(check_interval)
-
-        else:
-            timeout_payload = {
-                "type": "timeout",
-                "message_id": assistant_message_id,
-                "last_status": last_status,
-            }
-            yield f"data: {json.dumps(timeout_payload, default=str)}\n\n"
+                yield f"data: {json.dumps(timeout_payload, default=str)}\n\n"
+        except GeneratorExit:
+            # Client disconnected - this is normal
+            logger.debug(f"Client disconnected from stream for message {assistant_message_id}")
+            return
 
     response = StreamingHttpResponse(
         event_stream(),

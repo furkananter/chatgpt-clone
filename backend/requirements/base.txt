@@ -12,7 +12,6 @@ PyJWT>=2.7.0
 google-auth-oauthlib>=1.0.0
 channels>=3.0.5
 channels-redis>=4.0.0
-mem0ai>=0.1.0
 python-dotenv>=1.0.0
 whitenoise>=6.5.0
 gunicorn>=21.2.0

@@ -44,23 +44,6 @@ class AIModel(models.Model):
         return self.display_name
 
 
-class ConversationMemory(models.Model):
-    chat = models.OneToOneField(Chat, on_delete=models.CASCADE, related_name="memory")
-    mem0_memory_id = models.CharField(max_length=255, unique=True)
-
-    total_memories = models.PositiveIntegerField(default=0)
-    last_updated = models.DateTimeField(auto_now=True)
-    memory_summary = models.TextField(blank=True)
-
-    memory_decay_enabled = models.BooleanField(default=True)
-    max_memory_items = models.PositiveIntegerField(default=100)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self) -> str:
-        return f"Memory for chat {self.chat_id}"
-
-
 class UsageTracking(models.Model):
     OPERATION_CHOICES = [
         ("chat", "Chat"),

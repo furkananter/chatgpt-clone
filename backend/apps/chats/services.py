@@ -9,7 +9,6 @@ from django.utils import timezone
 from django.core.exceptions import ObjectDoesNotExist
 
 from apps.authentication.models import User
-from apps.ai_integration.services import Mem0Service
 from shared.cache import CacheService, RateLimiter
 from shared.exceptions import RateLimitExceededError
 
@@ -63,8 +62,6 @@ class ChatService:
         initial_message: str | None,
         chat_id: str | None = None,
     ) -> Chat:
-        mem0_service = Mem0Service()
-
         chat = await sync_to_async(ChatService._create_chat_atomic, thread_sensitive=True)(
             user=user,
             title=title,
@@ -72,16 +69,6 @@ class ChatService:
             system_prompt=system_prompt,
             chat_id=chat_id,
         )
-
-        try:
-            memory_id = await mem0_service.create_memory_context(str(user.id), str(chat.id))
-        except Exception as exc:  # pragma: no cover - external service
-            logger.warning("Unable to create memory context: %s", exc)
-            memory_id = None
-
-        if memory_id:
-            chat.mem0_memory_id = memory_id
-            await sync_to_async(chat.save, thread_sensitive=True)(update_fields=["mem0_memory_id"])
 
         if initial_message:
             await MessageService.create_message(
@@ -109,17 +96,12 @@ class ChatService:
 
     @staticmethod
     async def delete_chat(chat_id: str, *, user: User) -> None:
-        mem0_service = Mem0Service()
-
+        # Note: We don't delete mem0 memory anymore since it's shared across all user chats
         async def _delete():
             chat = Chat.objects.get(id=chat_id, user=user)
-            memory_id = chat.mem0_memory_id
             chat.delete()
-            return memory_id
 
-        memory_id = await sync_to_async(_delete, thread_sensitive=True)()
-        if memory_id:
-            await mem0_service.delete_memory_context(memory_id)
+        await sync_to_async(_delete, thread_sensitive=True)()
         CacheService.invalidate_user_cache(str(user.id))
 
 

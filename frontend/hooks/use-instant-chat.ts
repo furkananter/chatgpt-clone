@@ -244,6 +244,11 @@ export const useInstantChat = () => {
           });
 
           if (!response.ok) {
+            // Handle authentication errors specifically
+            if (response.status === 401 || response.status === 403) {
+              console.error("Authentication error during chat creation");
+              throw new Error("AUTHENTICATION_ERROR");
+            }
             throw new Error(`HTTP ${response.status}`);
           }
 
@@ -290,7 +295,26 @@ export const useInstantChat = () => {
           }
         } catch (error) {
           console.error("Error setting up streaming:", error);
-          // Fallback to refresh
+
+          // Check if it's an authentication error
+          if (error instanceof Error && error.message === "AUTHENTICATION_ERROR") {
+            // Remove optimistic data
+            queryClient.removeQueries({ queryKey: queryKeys.chatMessages(chatId) });
+            queryClient.setQueryData<ChatSummary[]>(
+              queryKeys.chats(),
+              (current = []) => current.filter((chat) => chat.id !== chatId)
+            );
+
+            // Clear assistant placeholder to stop "thinking..."
+            queryClient.setQueryData<ChatMessage[]>(
+              queryKeys.chatMessages(chatId),
+              (current = []) => current.filter(m => m.id !== placeholderId)
+            );
+
+            throw error; // Re-throw to be caught by outer catch
+          }
+
+          // For other errors, just invalidate
           queryClient.invalidateQueries({
             queryKey: queryKeys.chatMessages(chatId),
           });
@@ -310,13 +334,21 @@ export const useInstantChat = () => {
       } catch (error) {
         // Error handling: remove optimistic data and redirect back
         console.error("Background streaming error:", error);
+
+        // Clean up optimistic UI state
         queryClient.removeQueries({ queryKey: queryKeys.chatMessages(chatId) });
         queryClient.setQueryData<ChatSummary[]>(
           queryKeys.chats(),
           (current = []) => current.filter((chat) => chat.id !== chatId)
         );
         setActiveChatId(null);
-        router.push("/chat");
+
+        // If auth error, redirect to home, otherwise stay in chat
+        if (error instanceof Error && error.message === "AUTHENTICATION_ERROR") {
+          router.push("/");
+        } else {
+          router.push("/chat");
+        }
       }
     })();
 

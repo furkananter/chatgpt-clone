@@ -9,14 +9,9 @@ from django.db.models import Q
 
 from apps.chats.models import Message
 
-from .models import AIModel, ConversationMemory, UsageTracking
+from .models import AIModel, UsageTracking
 
 logger = logging.getLogger(__name__)
-
-try:  # pragma: no cover - optional dependency
-    from mem0 import Memory
-except ImportError:  # pragma: no cover - fallback behaviour
-    Memory = None  # type: ignore
 
 
 class OpenRouterAPIError(Exception):
@@ -42,14 +37,13 @@ class OpenRouterService:
         *,
         model: str,
         messages: List[Dict[str, str]],
-        memory_context: str = "",
         temperature: float = 0.7,
         max_tokens: int = 1000,
         **kwargs,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         system_message = {
             "role": "system",
-            "content": f"You are a helpful AI assistant. {memory_context}",
+            "content": "You are a helpful AI assistant.",
         }
         payload = {
             "model": model,
@@ -148,130 +142,6 @@ class OpenRouterService:
         except AIModel.DoesNotExist:
             logger.warning("Model %s not found in database", model)
             return 0.0
-
-
-class MemoryServiceError(Exception):
-    pass
-
-
-class Mem0Service:
-    def __init__(self):
-        if Memory is None:
-            self.memory = None
-        else:
-            # Use OpenAI with gpt-4o-mini for Mem0
-            try:
-                config = {
-                    "llm": {
-                        "provider": "openai",
-                        "config": {
-                            "model": "gpt-4o-mini",
-                            "api_key": settings.OPENAI_API_KEY,
-                        },
-                    },
-                    "version": "v1.1",
-                }
-                self.memory = Memory.from_config(config)
-                logger.info("Mem0 initialized successfully with OpenAI gpt-4o-mini")
-            except Exception as e:
-                logger.warning("Failed to initialize Mem0, disabling memory: %s", e)
-                self.memory = None
-
-    async def _run_async(self, func, *args, **kwargs):
-        if self.memory is None:
-            return None
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
-
-    async def create_memory_context(self, user_id: str, chat_id: str) -> Optional[str]:
-        memory_id = f"{user_id}_{chat_id}"
-        if self.memory is None:
-            return memory_id
-        try:
-            # Skip initial memory creation - just create the record
-            await ConversationMemory.objects.aupdate_or_create(
-                chat_id=chat_id,
-                defaults={"mem0_memory_id": memory_id},
-            )
-            return memory_id
-        except Exception as exc:  # pragma: no cover
-            logger.error("Failed to create memory context: %s", exc)
-            raise MemoryServiceError(str(exc)) from exc
-
-    async def add_conversation_memory(
-        self, memory_id: str, messages: List[Message], user_id: str
-    ):
-        if self.memory is None:
-            return
-        # Only process last few messages to reduce vector operations
-        recent_messages = messages[-3:] if len(messages) > 3 else messages
-        payload = [
-            {"role": msg.role, "content": msg.content} for msg in recent_messages
-        ]
-
-        # Skip if no meaningful content
-        if not any(msg.content.strip() for msg in recent_messages):
-            return
-
-        # Skip very short messages to reduce noise
-        if all(len(msg.content.strip()) < 10 for msg in recent_messages):
-            return
-
-        await self._run_async(self.memory.add, messages=payload, user_id=memory_id)
-
-    async def get_relevant_memories(
-        self, memory_id: str, query: str, limit: int = 5
-    ) -> str:
-        if self.memory is None:
-            return ""
-        try:
-            memories = await self._run_async(
-                self.memory.search,
-                query=query,
-                user_id=memory_id,
-                limit=limit,
-            )
-        except Exception as exc:  # pragma: no cover
-            logger.warning("Failed to retrieve memories: %s", exc)
-            return ""
-
-        context_parts: list[str] = []
-        for item in memories or []:
-            text: Optional[str] = None
-            if isinstance(item, dict):
-                text = item.get("text") or item.get("content") or item.get("value")
-                if not text and isinstance(item.get("payload"), dict):
-                    payload = item["payload"]
-                    text = payload.get("text") or payload.get("content")
-            elif isinstance(item, str):
-                text = item
-            else:
-                text = str(item)
-
-            if text:
-                context_parts.append(f"Memory: {text}")
-
-        return "\n".join(context_parts)
-
-    async def update_memory(
-        self,
-        memory_id: str,
-        memory_text: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        if self.memory is None:
-            return
-        await self._run_async(
-            self.memory.update,
-            memory_id=memory_id,
-            data=memory_text,
-            metadata=metadata or {},
-        )
-
-    async def delete_memory_context(self, memory_id: str) -> None:
-        if self.memory is None:
-            return
-        await self._run_async(self.memory.delete_all, user_id=memory_id)
 
 
 async def record_usage(

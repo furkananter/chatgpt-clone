@@ -10,14 +10,15 @@ import { createUserFromProfile } from "@/lib/stores/auth-store";
 import { queryKeys } from "@/lib/query/client";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { login, popup, setPopup, setLoading, isAuthenticated } =
+  const { login, logout, popup, setPopup, setLoading, isAuthenticated } =
     useAuthStore();
   const router = useRouter();
 
   const currentUserQuery = useQuery({
     queryKey: queryKeys.currentUser(),
-    enabled: !isAuthenticated,
+    enabled: true, // Always try to fetch user data if we have cookies
     retry: false,
+    staleTime: 5 * 60 * 1000, // 5 minutes
     queryFn: async () => {
       const userData = await apiClient.get("/api/v1/auth/me");
       return createUserFromProfile(userData);
@@ -33,6 +34,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login(currentUserQuery.data);
     }
   }, [currentUserQuery.data, isAuthenticated, login]);
+
+  // Handle authentication errors (401/403)
+  useEffect(() => {
+    if (currentUserQuery.isError && isAuthenticated) {
+      console.log("Auth check failed, logging out...");
+      logout();
+    }
+  }, [currentUserQuery.isError, isAuthenticated, logout]);
 
   useEffect(() => {
     const handleAuthMessage = (event: MessageEvent) => {

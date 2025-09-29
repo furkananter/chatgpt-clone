@@ -12,6 +12,11 @@ async def _stream_openrouter_response(
     request_kwargs: dict[str, Any],
     on_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, int]:
+    """
+    Stream AI response from OpenRouter API.
+
+    This function runs in an async context and properly handles streaming updates.
+    """
     from apps.ai_integration.services import OpenRouterService
 
     response_content = ""
@@ -30,18 +35,13 @@ async def _stream_openrouter_response(
 
                 # Try alternative response formats
                 if not content:
-                    # Some APIs might return content directly in choices[0]
                     content = choices[0].get("content", "")
-                    if content:
-                        logger.debug("Found content directly in choices: '%s'", content)
 
                 if content:
                     response_content += content
                     logger.debug("Added content: '%s'", content)
                     if on_chunk:
                         await on_chunk(response_content)
-                else:
-                    logger.debug("No content in delta: %s", delta)
             else:
                 # Check if chunk has a different structure
                 if "content" in chunk:
@@ -51,8 +51,6 @@ async def _stream_openrouter_response(
                         logger.debug("Found content directly in chunk: '%s'", content)
                         if on_chunk:
                             await on_chunk(response_content)
-                else:
-                    logger.debug("No choices in chunk: %s", chunk)
 
             usage = chunk.get("usage")
             if usage:
@@ -82,20 +80,8 @@ async def _stream_openrouter_response(
 class ConversationConfig:
     model: str
     messages: list[dict[str, str]]
-    memory_context: str
     temperature: float
     max_tokens: int
-
-
-def _fetch_mem0_context(
-    mem0_service,
-    *,
-    memory_id: str | None,
-    prompt: str,
-) -> str:
-    if not memory_id:
-        return ""
-    return asyncio.run(mem0_service.get_relevant_memories(memory_id, prompt))
 
 
 def _build_conversation_config(
@@ -103,21 +89,14 @@ def _build_conversation_config(
     chat,
     user_message,
     model: str,
-    mem0_service,
 ):
     from apps.chats.services import MessageService
 
     history = MessageService.get_conversation_context(chat, limit=20)
-    memory_context = _fetch_mem0_context(
-        mem0_service,
-        memory_id=chat.mem0_memory_id,
-        prompt=user_message.content,
-    )
     payload = history + [{"role": "user", "content": user_message.content}]
     return ConversationConfig(
         model=model,
         messages=payload,
-        memory_context=memory_context,
         temperature=chat.temperature,
         max_tokens=chat.max_tokens,
     )
@@ -201,14 +180,9 @@ def _fan_out_post_process(
     model: str,
     total_tokens: int,
 ) -> None:
-    from apps.ai_integration.tasks import track_usage, update_memory
+    from apps.ai_integration.tasks import track_usage
 
     # Execute directly instead of queueing
-    try:
-        update_memory(str(chat.id), str(assistant_message.id))
-    except Exception as e:
-        logger.error("Error updating memory: %s", e)
-
     try:
         track_usage(str(chat.user_id), model, total_tokens)
     except Exception as e:
@@ -221,10 +195,15 @@ def generate_ai_response(
     model: str,
     assistant_message_id: str | None = None,
 ):
+    """
+    Generate AI response in a background thread.
+
+    This function runs synchronously but calls async streaming operations.
+    It's designed to be called from a thread pool, not from async Django views.
+    """
     from django.utils import timezone
     from asgiref.sync import sync_to_async
     from apps.ai_integration.services import (
-        Mem0Service,
         OpenRouterAPIError,
         OpenRouterService,
     )
@@ -244,12 +223,10 @@ def generate_ai_response(
             raise Exception("AI response rate limit exceeded")
 
         resolved_model = OpenRouterService.resolve_model_id(model)
-        mem0_service = Mem0Service()
         config = _build_conversation_config(
             chat=chat,
             user_message=message,
             model=resolved_model,
-            mem0_service=mem0_service,
         )
 
         if assistant_message_id:
@@ -281,55 +258,30 @@ def generate_ai_response(
         request_kwargs = {
             "model": config.model,
             "messages": config.messages,
-            "memory_context": config.memory_context,
             "temperature": config.temperature,
             "max_tokens": config.max_tokens,
         }
 
         last_saved_length = 0
+        last_save_time = 0
 
         def _apply_stream_update(partial: str) -> None:
-            from django.db import connection
-            from django.db.utils import OperationalError
-
-            try:
-                # Ensure database connection is active
-                connection.ensure_connection()
-
-                assistant_message.content = partial
-                assistant_message.save(update_fields=["content", "updated_at"])
-            except OperationalError as e:
-                logger.warning("Database connection error during stream update: %s", e)
-                # Try to reconnect and retry once
-                try:
-                    connection.close()
-                    connection.ensure_connection()
-                    assistant_message.content = partial
-                    assistant_message.save(update_fields=["content", "updated_at"])
-                except Exception as retry_error:
-                    logger.error(
-                        "Failed to reconnect and save stream update: %s", retry_error
-                    )
-                    raise
-
-        last_save_time = 0
+            """Update message content in database. Django handles connection management."""
+            assistant_message.content = partial
+            assistant_message.save(update_fields=["content", "updated_at"])
 
         async def _handle_stream_update(partial: str) -> None:
             nonlocal last_saved_length, last_save_time
             import time
 
-            if not partial:
-                return
-
-            if len(partial) == last_saved_length:
+            if not partial or len(partial) == last_saved_length:
                 return
 
             current_time = time.time()
-            # Throttle saves: minimum 0.5 seconds between database writes or significant content change
+            # Optimized throttle: 1 second between DB writes or 200+ char change
             should_save = (
-                current_time - last_save_time > 0.5  # 500ms throttle
-                or len(partial) - last_saved_length
-                > 100  # Or significant content change
+                current_time - last_save_time > 1.0  # 1 second throttle
+                or len(partial) - last_saved_length > 200  # Or significant content
             )
 
             if should_save:
@@ -342,6 +294,7 @@ def generate_ai_response(
                 except Exception as e:
                     logger.warning("Failed to save stream update, continuing: %s", e)
 
+        # Run streaming in a new event loop (thread-safe)
         response_content, total_tokens = asyncio.run(
             _stream_openrouter_response(
                 request_kwargs=request_kwargs,

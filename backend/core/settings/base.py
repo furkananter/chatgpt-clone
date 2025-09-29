@@ -177,7 +177,7 @@ if CHANNEL_REDIS_PARSED.scheme == "rediss":
     }
 
 
-CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=True)
+CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[SITE_URL])
 CORS_ALLOW_CREDENTIALS = True
 
