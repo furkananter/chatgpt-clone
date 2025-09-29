@@ -160,7 +160,6 @@ export function Sidebar() {
                       <Skeleton className="h-3 w-16" />
                     </div>
                   </div>
-                  <Skeleton className="h-8 w-8 rounded-md" />
                 </div>
               ) : isAuthenticated && user ? (
                 <SettingsPopover

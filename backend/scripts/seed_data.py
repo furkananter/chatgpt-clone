@@ -42,6 +42,19 @@ def seed_models() -> None:
             "input_price_per_million": 30.0,
             "output_price_per_million": 60.0,
         },
+        {
+            "name": "gemini-2.5-flash",
+            "display_name": "Gemini 2.5 Flash",
+            "provider": "google",
+            "openrouter_model_id": "google/gemini-2.5-flash",
+            "supports_streaming": True,
+            "supports_function_calling": True,
+            "supports_vision": True,
+            "max_context_length": 1000000,
+            "max_output_tokens": 8192,
+            "input_price_per_million": 0.075,
+            "output_price_per_million": 0.3,
+        },
     ]
 
     for entry in defaults:
@@ -55,4 +68,3 @@ def seed_models() -> None:
 
 if __name__ == "__main__":
     seed_models()
-

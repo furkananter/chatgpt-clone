@@ -58,37 +58,37 @@ export function ChatInput({
     const uploadedFiles =
       files && files.length > 0
         ? await Promise.all(
-            files.map(async (filePart) => {
-              if (!filePart.url) return null;
-              const response = await fetch(filePart.url);
-              const blob = await response.blob();
-              const file = new File([blob], filePart.filename || "untitled", {
-                type: filePart.mediaType,
-              });
+          files.map(async (filePart) => {
+            if (!filePart.url) return null;
+            const response = await fetch(filePart.url);
+            const blob = await response.blob();
+            const file = new File([blob], filePart.filename || "untitled", {
+              type: filePart.mediaType,
+            });
 
-              const formData = new FormData();
-              formData.append("file", file);
-              formData.append(
-                "upload_preset",
-                process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!
-              );
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append(
+              "upload_preset",
+              process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!
+            );
 
-              const res = await fetch(
-                `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/upload`,
-                { method: "POST", body: formData }
-              );
-              const data = await res.json();
+            const res = await fetch(
+              `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/upload`,
+              { method: "POST", body: formData }
+            );
+            const data = await res.json();
 
-              URL.revokeObjectURL(filePart.url);
+            URL.revokeObjectURL(filePart.url);
 
-              return {
-                type: "file",
-                filename: data.original_filename ?? file.name,
-                mediaType: file.type,
-                url: String(data.secure_url),
-              } as AttachmentPayload;
-            })
-          )
+            return {
+              type: "file",
+              filename: data.original_filename ?? file.name,
+              mediaType: file.type,
+              url: String(data.secure_url),
+            } as AttachmentPayload;
+          })
+        )
         : [];
 
     const validUploadedFiles = (uploadedFiles || []).filter(

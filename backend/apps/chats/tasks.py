@@ -13,6 +13,7 @@ async def _stream_openrouter_response(
     on_chunk: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, int]:
     from apps.ai_integration.services import OpenRouterService
+
     response_content = ""
     total_tokens = 0
     chunk_count = 0
@@ -21,19 +22,19 @@ async def _stream_openrouter_response(
         async for chunk in OpenRouterService.stream_completion(**request_kwargs):
             chunk_count += 1
             logger.debug("Received chunk %d: %s", chunk_count, chunk)
-            
+
             choices = chunk.get("choices")
             if choices:
                 delta = choices[0].get("delta", {})
                 content = delta.get("content", "")
-                
+
                 # Try alternative response formats
                 if not content:
                     # Some APIs might return content directly in choices[0]
                     content = choices[0].get("content", "")
                     if content:
                         logger.debug("Found content directly in choices: '%s'", content)
-                
+
                 if content:
                     response_content += content
                     logger.debug("Added content: '%s'", content)
@@ -52,20 +53,26 @@ async def _stream_openrouter_response(
                             await on_chunk(response_content)
                 else:
                     logger.debug("No choices in chunk: %s", chunk)
-                
+
             usage = chunk.get("usage")
             if usage:
                 total_tokens = usage.get("total_tokens", total_tokens)
                 logger.debug("Updated total_tokens: %d", total_tokens)
 
-        logger.info("Stream completed: %d chunks, %d tokens, content length: %d", 
-                   chunk_count, total_tokens, len(response_content))
-        
+        logger.info(
+            "Stream completed: %d chunks, %d tokens, content length: %d",
+            chunk_count,
+            total_tokens,
+            len(response_content),
+        )
+
         if not response_content:
-            logger.warning("Empty response content received after %d chunks", chunk_count)
-            
+            logger.warning(
+                "Empty response content received after %d chunks", chunk_count
+            )
+
         return response_content, total_tokens
-        
+
     except Exception as exc:
         logger.error("Error during streaming response: %s", exc)
         raise
@@ -147,7 +154,13 @@ def _finalize_assistant_success(
     assistant_message.total_tokens = total_tokens
     assistant_message.completed_at = timezone.now()
     assistant_message.save(
-        update_fields=["content", "status", "total_tokens", "completed_at", "updated_at"]
+        update_fields=[
+            "content",
+            "status",
+            "total_tokens",
+            "completed_at",
+            "updated_at",
+        ]
     )
 
 
@@ -167,7 +180,9 @@ def _update_chat_metrics(chat, *, total_tokens: int) -> None:
         last_message_at=timezone.now(),
         total_tokens_used=chat.total_tokens_used + total_tokens,
     )
-    chat.refresh_from_db(fields=["message_count", "last_message_at", "total_tokens_used"])
+    chat.refresh_from_db(
+        fields=["message_count", "last_message_at", "total_tokens_used"]
+    )
 
 
 def _maybe_generate_title(chat, *, assistant_preview: str) -> None:
@@ -219,7 +234,9 @@ def generate_ai_response(
 
     assistant_message = None
     try:
-        message = Message.objects.select_related("chat", "chat__user").get(id=user_message_id)
+        message = Message.objects.select_related("chat", "chat__user").get(
+            id=user_message_id
+        )
         chat = message.chat
         user = chat.user
 
@@ -272,11 +289,34 @@ def generate_ai_response(
         last_saved_length = 0
 
         def _apply_stream_update(partial: str) -> None:
-            assistant_message.content = partial
-            assistant_message.save(update_fields=["content", "updated_at"])
+            from django.db import connection
+            from django.db.utils import OperationalError
+
+            try:
+                # Ensure database connection is active
+                connection.ensure_connection()
+
+                assistant_message.content = partial
+                assistant_message.save(update_fields=["content", "updated_at"])
+            except OperationalError as e:
+                logger.warning("Database connection error during stream update: %s", e)
+                # Try to reconnect and retry once
+                try:
+                    connection.close()
+                    connection.ensure_connection()
+                    assistant_message.content = partial
+                    assistant_message.save(update_fields=["content", "updated_at"])
+                except Exception as retry_error:
+                    logger.error(
+                        "Failed to reconnect and save stream update: %s", retry_error
+                    )
+                    raise
+
+        last_save_time = 0
 
         async def _handle_stream_update(partial: str) -> None:
-            nonlocal last_saved_length
+            nonlocal last_saved_length, last_save_time
+            import time
 
             if not partial:
                 return
@@ -284,8 +324,23 @@ def generate_ai_response(
             if len(partial) == last_saved_length:
                 return
 
-            last_saved_length = len(partial)
-            await sync_to_async(_apply_stream_update, thread_sensitive=True)(partial)
+            current_time = time.time()
+            # Throttle saves: minimum 0.5 seconds between database writes or significant content change
+            should_save = (
+                current_time - last_save_time > 0.5  # 500ms throttle
+                or len(partial) - last_saved_length
+                > 100  # Or significant content change
+            )
+
+            if should_save:
+                last_saved_length = len(partial)
+                last_save_time = current_time
+                try:
+                    await sync_to_async(_apply_stream_update, thread_sensitive=True)(
+                        partial
+                    )
+                except Exception as e:
+                    logger.warning("Failed to save stream update, continuing: %s", e)
 
         response_content, total_tokens = asyncio.run(
             _stream_openrouter_response(
@@ -293,6 +348,13 @@ def generate_ai_response(
                 on_chunk=_handle_stream_update,
             )
         )
+
+        # Ensure final content is saved even if throttled
+        if response_content and len(response_content) > last_saved_length:
+            try:
+                _apply_stream_update(response_content)
+            except Exception as e:
+                logger.warning("Failed to save final stream content: %s", e)
 
         if not response_content.strip():
             error_msg = "AI returned empty response"
@@ -365,4 +427,6 @@ def process_message_attachments(message_id: str):
             attachment.is_processed = True
             attachment.save(update_fields=["is_processed", "updated_at"])
     except Message.DoesNotExist:
-        logger.warning("Message %s no longer exists for attachment processing", message_id)
+        logger.warning(
+            "Message %s no longer exists for attachment processing", message_id
+        )
